@@ -1,0 +1,76 @@
+@import "tailwindcss";
+
+:root {
+  --honda-red: #cc0000;
+  --honda-red-dark: #8b0000;
+  --honda-red-deep: #bf1a2f;
+  --honda-ink: #1a1a1a;
+  --honda-black: #0c0c0c;
+  --honda-muted: #646363;
+  --honda-gray: #5e5e5e;
+  --honda-line: #e6e6e6;
+  --background: #ffffff;
+  --foreground: #1a1a1a;
+}
+
+@theme inline {
+  --color-honda-red: var(--honda-red);
+  --color-honda-red-dark: var(--honda-red-dark);
+  --color-honda-red-deep: var(--honda-red-deep);
+  --color-honda-ink: var(--honda-ink);
+  --color-honda-black: var(--honda-black);
+  --color-honda-muted: var(--honda-muted);
+  --color-honda-gray: var(--honda-gray);
+  --color-honda-line: var(--honda-line);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-open-sans);
+  --font-display: var(--font-hind);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: #fff;
+  color: var(--honda-ink);
+  font-family: var(--font-open-sans), "Open Sans", sans-serif;
+  margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+.font-display {
+  font-family: var(--font-hind), Hind, sans-serif;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+::selection {
+  background: var(--honda-red);
+  color: #fff;
+}
+
+.honda-container {
+  width: min(1280px, calc(100% - 2rem));
+  margin-inline: auto;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
