@@ -185,7 +185,7 @@ function NuevoClienteModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/40 pt-16 pb-8">
+    <div className="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-black/40 pt-16 pb-8" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form
         onSubmit={handleSubmit}
         className="relative w-full max-w-lg bg-white p-6 shadow-xl sm:p-8"

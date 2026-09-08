@@ -11,11 +11,91 @@ import { PendienteReciboModal } from "@/components/ventas/PendienteReciboModal";
 /*  Constants & Types                                                  */
 /* ------------------------------------------------------------------ */
 
+/* ---- Multi-Select Filter Dropdown ---- */
+function MultiSelectFilter({ options, selected, onChange, placeholder = "Todos", width = "w-full" }: {
+  options: { value: string; label: string }[];
+  selected: Set<string>;
+  onChange: (s: Set<string>) => void;
+  placeholder?: string;
+  width?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const filtered = q.trim() ? options.filter((o) => o.label.toLowerCase().includes(q.toLowerCase())) : options;
+  const toggle = (v: string) => { const next = new Set(selected); if (next.has(v)) next.delete(v); else next.add(v); onChange(next); };
+
+  return (
+    <div ref={ref} className={`relative ${width}`}>
+      <button type="button" onClick={() => setOpen(!open)} className="flex h-7 w-full items-center justify-between border border-honda-line bg-white px-2 text-xs outline-none focus:border-[#CC0000]">
+        <span className="truncate">{selected.size === 0 ? placeholder : `${selected.size} sel.`}</span>
+        <span className="ml-1 text-[9px] text-honda-muted">▼</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-[60] mt-0.5 max-h-52 w-56 overflow-auto border border-honda-line bg-white shadow-lg">
+          <div className="sticky top-0 border-b border-honda-line bg-white p-1">
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar..." className="h-6 w-full border border-honda-line px-2 text-xs outline-none focus:border-[#CC0000]" />
+          </div>
+          {selected.size > 0 && (
+            <button type="button" onClick={() => onChange(new Set())} className="w-full px-2 py-1 text-left text-[10px] text-[#CC0000] hover:bg-red-50">Limpiar selección</button>
+          )}
+          {filtered.length === 0 ? (
+            <div className="px-2 py-2 text-xs text-honda-muted">Sin resultados</div>
+          ) : filtered.map((o) => (
+            <label key={o.value} className="flex cursor-pointer items-center gap-2 px-2 py-1 text-xs hover:bg-[#f6f6f6]">
+              <input type="checkbox" checked={selected.has(o.value)} onChange={() => toggle(o.value)} className="h-3 w-3 accent-[#CC0000]" />
+              <span className="truncate">{o.label}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---- Numeric Comparator Filter ---- */
+function NumericFilter({ value, onChange, placeholder = ">0, <1000" }: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
+  return (
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder={placeholder}
+      title="Ej: >100000 (mayor a), <50000 (menor a), =0 (igual a)"
+      className="h-7 w-full border border-honda-line px-2 text-xs outline-none focus:border-[#CC0000]"
+    />
+  );
+}
+
+function applyNumericFilter(val: number, filter: string): boolean {
+  const f = filter.trim();
+  if (!f) return true;
+  if (f.startsWith(">=")) { const n = parseFloat(f.slice(2)); return !isNaN(n) && val >= n; }
+  if (f.startsWith("<=")) { const n = parseFloat(f.slice(2)); return !isNaN(n) && val <= n; }
+  if (f.startsWith(">")) { const n = parseFloat(f.slice(1)); return !isNaN(n) && val > n; }
+  if (f.startsWith("<")) { const n = parseFloat(f.slice(1)); return !isNaN(n) && val < n; }
+  if (f.startsWith("=")) { const n = parseFloat(f.slice(1)); return !isNaN(n) && val === n; }
+  const n = parseFloat(f);
+  return !isNaN(n) && val === n;
+}
+
 const ESTADO_LABELS: Record<string, string> = {
   PRESUPUESTO: "Presupuesto",
   NOTA_DE_PEDIDO: "Nota de Pedido",
   PENDIENTE_RECIBO_MERCADERIA: "Pend. Recibo Mercadería",
   PENDIENTE_ENTREGA_CLIENTE: "Pend. Entrega Cliente",
+  ENTREGADO_PARCIAL: "Entregado Parcial",
+  ENTREGADO_TOTAL: "Entregado Total",
   COMPLETADO: "Completado",
   ANULADO: "Anulado",
   DEVOLUCION: "Devolución",
@@ -27,6 +107,8 @@ const ESTADO_COLORS: Record<string, string> = {
   NOTA_DE_PEDIDO: "bg-indigo-100 text-indigo-800",
   PENDIENTE_RECIBO_MERCADERIA: "bg-orange-100 text-orange-800",
   PENDIENTE_ENTREGA_CLIENTE: "bg-yellow-100 text-yellow-800",
+  ENTREGADO_PARCIAL: "bg-teal-100 text-teal-800",
+  ENTREGADO_TOTAL: "bg-emerald-100 text-emerald-800",
   COMPLETADO: "bg-green-100 text-green-800",
   ANULADO: "bg-red-100 text-red-800",
   DEVOLUCION: "bg-rose-100 text-rose-800",
@@ -37,7 +119,9 @@ const TRANSICIONES: Record<string, string[]> = {
   PRESUPUESTO: ["NOTA_DE_PEDIDO", "ANULADO"],
   NOTA_DE_PEDIDO: ["PENDIENTE_RECIBO_MERCADERIA", "PENDIENTE_ENTREGA_CLIENTE", "ANULADO"],
   PENDIENTE_RECIBO_MERCADERIA: ["PENDIENTE_ENTREGA_CLIENTE", "ANULADO"],
-  PENDIENTE_ENTREGA_CLIENTE: ["COMPLETADO", "ANULADO"],
+  PENDIENTE_ENTREGA_CLIENTE: ["ENTREGADO_PARCIAL", "ENTREGADO_TOTAL", "ANULADO"],
+  ENTREGADO_PARCIAL: ["ENTREGADO_TOTAL", "COMPLETADO", "ANULADO"],
+  ENTREGADO_TOTAL: ["COMPLETADO"],
   COMPLETADO: ["DEVOLUCION", "DEVOLUCION_PARCIAL"],
   ANULADO: [],
   DEVOLUCION: [],
@@ -61,6 +145,9 @@ type VentaItem = {
   margen_porcentaje?: number;
   monto_iva: number;
   monto_total_linea: number;
+  estado_item: string;
+  cantidad_entregada: number;
+  cantidad_facturada: number;
 };
 
 type Venta = {
@@ -77,8 +164,8 @@ type Venta = {
   forma_pago: string;
   estado_venta: string;
   precios_congelados: boolean;
-  facturada: boolean;
   cantidad_items: number;
+  facturas: string[];
   comprobantes: string;
   observaciones: string;
   items: VentaItem[];
@@ -92,50 +179,101 @@ type ClienteResult = {
   tipo_factura_habitual: string;
 };
 
+type FacturaVentaDetail = {
+  numero_comprobante: string;
+  tipo_comprobante: string;
+  tipo_letra: string;
+  fecha_emision: string;
+  cliente_razon_social: string;
+  monto_subtotal: number;
+  monto_iva: number;
+  monto_total_factura: number;
+  estado_cobro: string;
+  items: {
+    id_venta: number;
+    codigo_producto: string;
+    descripcion: string;
+    cantidad: number;
+    precio_unitario: number;
+    monto_iva: number;
+    monto_total: number;
+  }[];
+};
+
 /* ------------------------------------------------------------------ */
 /*  Mock data                                                          */
 /* ------------------------------------------------------------------ */
 
 const MOCK_ITEMS_501: VentaItem[] = [
-  { id_detalle_venta: 1002, codigo_producto: "REP-8834", descripcion_item: "Filtro de Aceite sintético reforzado V2", cantidad: 5, precio_unitario_sin_iva: 67200, precio_ars: 67200, tipo_dolar: "Blue", descuento_porcentaje: 5, descuento_monto: 3360, margen: 15840, margen_porcentaje: 33, monto_iva: 14112, monto_total_linea: 81312 },
-  { id_detalle_venta: 1003, codigo_producto: "REP-1201", descripcion_item: "Pastillas de freno delanteras cerámicas", cantidad: 3, precio_unitario_sin_iva: 44800, precio_ars: 44800, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 12800, margen_porcentaje: 40, monto_iva: 9408, monto_total_linea: 54208 },
+  { id_detalle_venta: 1002, codigo_producto: "REP-8834", descripcion_item: "Filtro de Aceite sintético reforzado V2", cantidad: 5, precio_unitario_sin_iva: 67200, precio_ars: 67200, tipo_dolar: "Blue", descuento_porcentaje: 5, descuento_monto: 3360, margen: 15840, margen_porcentaje: 33, monto_iva: 14112, monto_total_linea: 81312, estado_item: "ENTREGADO", cantidad_entregada: 5, cantidad_facturada: 5 },
+  { id_detalle_venta: 1003, codigo_producto: "REP-1201", descripcion_item: "Pastillas de freno delanteras cerámicas", cantidad: 3, precio_unitario_sin_iva: 44800, precio_ars: 44800, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 12800, margen_porcentaje: 40, monto_iva: 9408, monto_total_linea: 54208, estado_item: "ENTREGADO", cantidad_entregada: 3, cantidad_facturada: 3 },
 ];
 
 const MOCK_ITEMS_500: VentaItem[] = [
-  { id_detalle_venta: 1010, codigo_producto: "REP-8834", descripcion_item: "Filtro de Aceite sintético reforzado V2", cantidad: 10, precio_unitario_sin_iva: 67200, precio_ars: 67200, tipo_dolar: "Blue", descuento_porcentaje: 10, descuento_monto: 6720, margen: 12480, margen_porcentaje: 26, monto_iva: 14112, monto_total_linea: 81312 },
-  { id_detalle_venta: 1011, codigo_producto: "REP-9999", descripcion_item: "Válvula EGR electrónica", cantidad: 2, precio_unitario_sin_iva: 175000, precio_ars: 175000, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 0, margen_porcentaje: 0, monto_iva: 36750, monto_total_linea: 211750 },
+  { id_detalle_venta: 1010, codigo_producto: "REP-8834", descripcion_item: "Filtro de Aceite sintético reforzado V2", cantidad: 10, precio_unitario_sin_iva: 67200, precio_ars: 67200, tipo_dolar: "Blue", descuento_porcentaje: 10, descuento_monto: 6720, margen: 12480, margen_porcentaje: 26, monto_iva: 14112, monto_total_linea: 81312, estado_item: "ENTREGADO", cantidad_entregada: 10, cantidad_facturada: 10 },
+  { id_detalle_venta: 1011, codigo_producto: "REP-9999", descripcion_item: "Válvula EGR electrónica", cantidad: 2, precio_unitario_sin_iva: 175000, precio_ars: 175000, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 0, margen_porcentaje: 0, monto_iva: 36750, monto_total_linea: 211750, estado_item: "ENTREGADO", cantidad_entregada: 2, cantidad_facturada: 2 },
 ];
 
 const MOCK_ITEMS_499: VentaItem[] = [
-  { id_detalle_venta: 1020, codigo_producto: "REP-3300", descripcion_item: "Correa de distribución reforzada", cantidad: 1, precio_unitario_sin_iva: 91000, precio_ars: 91000, tipo_dolar: "MEP", descuento_porcentaje: 0, descuento_monto: 0, margen: 1300, margen_porcentaje: 1.4, monto_iva: 19110, monto_total_linea: 95400 },
+  { id_detalle_venta: 1020, codigo_producto: "REP-3300", descripcion_item: "Correa de distribución reforzada", cantidad: 1, precio_unitario_sin_iva: 91000, precio_ars: 91000, tipo_dolar: "MEP", descuento_porcentaje: 0, descuento_monto: 0, margen: 1300, margen_porcentaje: 1.4, monto_iva: 19110, monto_total_linea: 95400, estado_item: "PENDIENTE", cantidad_entregada: 0, cantidad_facturada: 0 },
 ];
 
 const MOCK_ITEMS_498: VentaItem[] = [
-  { id_detalle_venta: 1030, codigo_producto: "REP-5501", descripcion_item: "Bujía de encendido iridium", cantidad: 8, precio_unitario_sin_iva: 0, monto_iva: 0, monto_total_linea: 0 },
-  { id_detalle_venta: 1031, codigo_producto: "REP-1201", descripcion_item: "Pastillas de freno delanteras cerámicas", cantidad: 4, precio_unitario_sin_iva: 0, monto_iva: 0, monto_total_linea: 0 },
-  { id_detalle_venta: 1032, codigo_producto: "REP-3300", descripcion_item: "Correa de distribución reforzada", cantidad: 2, precio_unitario_sin_iva: 0, monto_iva: 0, monto_total_linea: 0 },
+  { id_detalle_venta: 1030, codigo_producto: "REP-5501", descripcion_item: "Bujía de encendido iridium", cantidad: 8, precio_unitario_sin_iva: 0, monto_iva: 0, monto_total_linea: 0, estado_item: "PENDIENTE", cantidad_entregada: 0, cantidad_facturada: 0 },
+  { id_detalle_venta: 1031, codigo_producto: "REP-1201", descripcion_item: "Pastillas de freno delanteras cerámicas", cantidad: 4, precio_unitario_sin_iva: 0, monto_iva: 0, monto_total_linea: 0, estado_item: "PENDIENTE", cantidad_entregada: 0, cantidad_facturada: 0 },
+  { id_detalle_venta: 1032, codigo_producto: "REP-3300", descripcion_item: "Correa de distribución reforzada", cantidad: 2, precio_unitario_sin_iva: 0, monto_iva: 0, monto_total_linea: 0, estado_item: "PENDIENTE", cantidad_entregada: 0, cantidad_facturada: 0 },
 ];
 
 const MOCK_ITEMS_497: VentaItem[] = [
-  { id_detalle_venta: 1040, codigo_producto: "REP-8834", descripcion_item: "Filtro de Aceite sintético reforzado V2", cantidad: 20, precio_unitario_sin_iva: 67200, precio_ars: 67200, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 15200, margen_porcentaje: 29.2, monto_iva: 14112, monto_total_linea: 81312 },
-  { id_detalle_venta: 1041, codigo_producto: "REP-9999", descripcion_item: "Válvula EGR electrónica", cantidad: 5, precio_unitario_sin_iva: 175000, precio_ars: 175000, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 0, margen_porcentaje: 0, monto_iva: 36750, monto_total_linea: 211750 },
-  { id_detalle_venta: 1042, codigo_producto: "REP-5501", descripcion_item: "Bujía de encendido iridium", cantidad: 50, precio_unitario_sin_iva: 11900, precio_ars: 11900, tipo_dolar: "Oficial", descuento_porcentaje: 0, descuento_monto: 0, margen: 2965, margen_porcentaje: 33.2, monto_iva: 2499, monto_total_linea: 14399 },
+  { id_detalle_venta: 1040, codigo_producto: "REP-8834", descripcion_item: "Filtro de Aceite sintético reforzado V2", cantidad: 20, precio_unitario_sin_iva: 67200, precio_ars: 67200, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 15200, margen_porcentaje: 29.2, monto_iva: 14112, monto_total_linea: 81312, estado_item: "PENDIENTE", cantidad_entregada: 0, cantidad_facturada: 0 },
+  { id_detalle_venta: 1041, codigo_producto: "REP-9999", descripcion_item: "Válvula EGR electrónica", cantidad: 5, precio_unitario_sin_iva: 175000, precio_ars: 175000, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 0, margen_porcentaje: 0, monto_iva: 36750, monto_total_linea: 211750, estado_item: "PENDIENTE", cantidad_entregada: 0, cantidad_facturada: 0 },
+  { id_detalle_venta: 1042, codigo_producto: "REP-5501", descripcion_item: "Bujía de encendido iridium", cantidad: 50, precio_unitario_sin_iva: 11900, precio_ars: 11900, tipo_dolar: "Oficial", descuento_porcentaje: 0, descuento_monto: 0, margen: 2965, margen_porcentaje: 33.2, monto_iva: 2499, monto_total_linea: 14399, estado_item: "PENDIENTE", cantidad_entregada: 0, cantidad_facturada: 0 },
+];
+
+const MOCK_ITEMS_493: VentaItem[] = [
+  { id_detalle_venta: 1060, codigo_producto: "REP-8834", descripcion_item: "Filtro de Aceite sintético reforzado V2", cantidad: 5, precio_unitario_sin_iva: 67200, precio_ars: 67200, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 15200, margen_porcentaje: 29.2, monto_iva: 14112, monto_total_linea: 81312, estado_item: "ENTREGADO", cantidad_entregada: 5, cantidad_facturada: 3 },
+  { id_detalle_venta: 1061, codigo_producto: "REP-1201", descripcion_item: "Pastillas de freno delanteras cerámicas", cantidad: 3, precio_unitario_sin_iva: 44800, precio_ars: 44800, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 12800, margen_porcentaje: 40, monto_iva: 9408, monto_total_linea: 54208, estado_item: "ENTREGADO", cantidad_entregada: 3, cantidad_facturada: 0 },
+];
+
+const MOCK_ITEMS_503: VentaItem[] = [
+  { id_detalle_venta: 1090, codigo_producto: "REP-8834", descripcion_item: "Filtro de Aceite sintético reforzado V2", cantidad: 10, precio_unitario_sin_iva: 67200, precio_ars: 67200, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 15200, margen_porcentaje: 29.2, monto_iva: 14112, monto_total_linea: 81312, estado_item: "ENTREGADO", cantidad_entregada: 10, cantidad_facturada: 0 },
+  { id_detalle_venta: 1091, codigo_producto: "REP-1201", descripcion_item: "Pastillas de freno delanteras cerámicas", cantidad: 6, precio_unitario_sin_iva: 44800, precio_ars: 44800, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 12800, margen_porcentaje: 40, monto_iva: 9408, monto_total_linea: 54208, estado_item: "ENTREGADO", cantidad_entregada: 6, cantidad_facturada: 0 },
+];
+
+const MOCK_ITEMS_502: VentaItem[] = [
+  { id_detalle_venta: 1100, codigo_producto: "REP-9999", descripcion_item: "Válvula EGR electrónica", cantidad: 3, precio_unitario_sin_iva: 175000, precio_ars: 175000, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 50000, margen_porcentaje: 40, monto_iva: 36750, monto_total_linea: 211750, estado_item: "ENTREGADO", cantidad_entregada: 2, cantidad_facturada: 0 },
+  { id_detalle_venta: 1101, codigo_producto: "REP-5501", descripcion_item: "Bujía de encendido iridium", cantidad: 20, precio_unitario_sin_iva: 11900, precio_ars: 11900, tipo_dolar: "Oficial", descuento_porcentaje: 0, descuento_monto: 0, margen: 2965, margen_porcentaje: 33.2, monto_iva: 2499, monto_total_linea: 14399, estado_item: "PENDIENTE", cantidad_entregada: 0, cantidad_facturada: 0 },
+];
+
+const MOCK_ITEMS_492: VentaItem[] = [
+  { id_detalle_venta: 1070, codigo_producto: "REP-9999", descripcion_item: "Válvula EGR electrónica", cantidad: 4, precio_unitario_sin_iva: 175000, precio_ars: 175000, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 0, margen_porcentaje: 0, monto_iva: 36750, monto_total_linea: 211750, estado_item: "ENTREGADO", cantidad_entregada: 2, cantidad_facturada: 0 },
+  { id_detalle_venta: 1071, codigo_producto: "REP-5501", descripcion_item: "Bujía de encendido iridium", cantidad: 10, precio_unitario_sin_iva: 11900, precio_ars: 11900, tipo_dolar: "Oficial", descuento_porcentaje: 0, descuento_monto: 0, margen: 2965, margen_porcentaje: 33.2, monto_iva: 2499, monto_total_linea: 14399, estado_item: "ANULADO", cantidad_entregada: 0, cantidad_facturada: 0 },
+];
+
+const MOCK_ITEMS_491: VentaItem[] = [
+  { id_detalle_venta: 1080, codigo_producto: "REP-5501", descripcion_item: "Bujía de encendido iridium", cantidad: 20, precio_unitario_sin_iva: 11900, precio_ars: 11900, tipo_dolar: "Oficial", descuento_porcentaje: 0, descuento_monto: 0, margen: 2965, margen_porcentaje: 33.2, monto_iva: 2499, monto_total_linea: 14399, estado_item: "ENTREGADO", cantidad_entregada: 20, cantidad_facturada: 0 },
+  { id_detalle_venta: 1081, codigo_producto: "REP-3300", descripcion_item: "Correa de distribución reforzada", cantidad: 2, precio_unitario_sin_iva: 91000, precio_ars: 91000, tipo_dolar: "MEP", descuento_porcentaje: 0, descuento_monto: 0, margen: 1300, margen_porcentaje: 1.4, monto_iva: 19110, monto_total_linea: 110110, estado_item: "ENTREGADO", cantidad_entregada: 2, cantidad_facturada: 0 },
 ];
 
 const MOCK_ITEMS_494: VentaItem[] = [
-  { id_detalle_venta: 1050, codigo_producto: "REP-8834", descripcion_item: "Filtro de Aceite sintético reforzado V2", cantidad: 3, precio_unitario_sin_iva: 67200, precio_ars: 67200, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 15200, margen_porcentaje: 29.2, monto_iva: 14112, monto_total_linea: 81312 },
-  { id_detalle_venta: 1051, codigo_producto: "REP-3300", descripcion_item: "Correa de distribución reforzada", cantidad: 1, precio_unitario_sin_iva: 91000, precio_ars: 91000, tipo_dolar: "MEP", descuento_porcentaje: 0, descuento_monto: 0, margen: 1300, margen_porcentaje: 1.4, monto_iva: 19110, monto_total_linea: 110110 },
+  { id_detalle_venta: 1050, codigo_producto: "REP-8834", descripcion_item: "Filtro de Aceite sintético reforzado V2", cantidad: 3, precio_unitario_sin_iva: 67200, precio_ars: 67200, tipo_dolar: "Blue", descuento_porcentaje: 0, descuento_monto: 0, margen: 15200, margen_porcentaje: 29.2, monto_iva: 14112, monto_total_linea: 81312, estado_item: "PENDIENTE", cantidad_entregada: 0, cantidad_facturada: 0 },
+  { id_detalle_venta: 1051, codigo_producto: "REP-3300", descripcion_item: "Correa de distribución reforzada", cantidad: 1, precio_unitario_sin_iva: 91000, precio_ars: 91000, tipo_dolar: "MEP", descuento_porcentaje: 0, descuento_monto: 0, margen: 1300, margen_porcentaje: 1.4, monto_iva: 19110, monto_total_linea: 110110, estado_item: "PENDIENTE", cantidad_entregada: 0, cantidad_facturada: 0 },
 ];
 
 const MOCK: Venta[] = [
-  { id_venta: 501, fecha_venta: "2026-09-04", cliente_razon_social: "Repuestos El Sol S.R.L.", cliente_cuit: "30-71234567-8", id_cliente: 12, canal_venta_aplicado: "Efectivo", monto_total_venta: 162624, monto_abonado: 100000, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Efectivo", estado_venta: "COMPLETADO", precios_congelados: true, facturada: true, cantidad_items: 2, comprobantes: "FC-A-0001-4512", observaciones: "", items: MOCK_ITEMS_501 },
-  { id_venta: 500, fecha_venta: "2026-09-03", cliente_razon_social: "AutoCenter S.A.", cliente_cuit: "30-72345678-9", id_cliente: 13, canal_venta_aplicado: "Mayorista", monto_total_venta: 485200, monto_abonado: 485200, descuento_general_porcentaje: 5, descuento_general_monto: 25537, forma_pago: "Cuenta Corriente", estado_venta: "COMPLETADO", precios_congelados: true, facturada: true, cantidad_items: 2, comprobantes: "FC-A-0001-4511", observaciones: "", items: MOCK_ITEMS_500 },
-  { id_venta: 499, fecha_venta: "2026-09-02", cliente_razon_social: "Distribuidora Norte", cliente_cuit: "30-73456789-0", id_cliente: 14, canal_venta_aplicado: "MercadoLibre", monto_total_venta: 95400, monto_abonado: 0, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Transferencia", estado_venta: "PENDIENTE_ENTREGA_CLIENTE", precios_congelados: true, facturada: false, cantidad_items: 1, comprobantes: "—", observaciones: "", items: MOCK_ITEMS_499 },
-  { id_venta: 498, fecha_venta: "2026-09-01", cliente_razon_social: "Taller Méndez", cliente_cuit: "20-28456789-1", id_cliente: 15, canal_venta_aplicado: "Minorista", monto_total_venta: 0, monto_abonado: 0, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Tarjeta", estado_venta: "NOTA_DE_PEDIDO", precios_congelados: false, facturada: false, cantidad_items: 3, comprobantes: "—", observaciones: "Pedido sin presupuesto previo", items: MOCK_ITEMS_498 },
-  { id_venta: 497, fecha_venta: "2026-08-31", cliente_razon_social: "Moto Parts Express", cliente_cuit: "30-74567890-2", id_cliente: 16, canal_venta_aplicado: "Agencia", monto_total_venta: 1200000, monto_abonado: 0, descuento_general_porcentaje: 10, descuento_general_monto: 133333, forma_pago: "Cheque", estado_venta: "PRESUPUESTO", precios_congelados: true, facturada: false, cantidad_items: 3, comprobantes: "—", observaciones: "Cotización grande", items: MOCK_ITEMS_497 },
-  { id_venta: 496, fecha_venta: "2026-08-30", cliente_razon_social: "Repuestos El Sol S.R.L.", cliente_cuit: "30-71234567-8", id_cliente: 12, canal_venta_aplicado: "Efectivo", monto_total_venta: 78300, monto_abonado: 0, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Efectivo", estado_venta: "ANULADO", precios_congelados: true, facturada: false, cantidad_items: 1, comprobantes: "—", observaciones: "Error de carga", items: [] },
-  { id_venta: 495, fecha_venta: "2026-08-29", cliente_razon_social: "AutoCenter S.A.", cliente_cuit: "30-72345678-9", id_cliente: 13, canal_venta_aplicado: "Mayorista", monto_total_venta: 310500, monto_abonado: 310500, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Cuenta Corriente", estado_venta: "DEVOLUCION_PARCIAL", precios_congelados: true, facturada: true, cantidad_items: 4, comprobantes: "FC-A-0001-4506, NC-A-0001-101", observaciones: "", items: [] },
-  { id_venta: 494, fecha_venta: "2026-08-28", cliente_razon_social: "Distribuidora Norte", cliente_cuit: "30-73456789-0", id_cliente: 14, canal_venta_aplicado: "Efectivo", monto_total_venta: 44800, monto_abonado: 0, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Efectivo", estado_venta: "PENDIENTE_RECIBO_MERCADERIA", precios_congelados: true, facturada: false, cantidad_items: 2, comprobantes: "—", observaciones: "Esperando proveedor", items: MOCK_ITEMS_494 },
+  { id_venta: 503, fecha_venta: "2026-09-07", cliente_razon_social: "Taller Méndez", cliente_cuit: "20-28456789-1", id_cliente: 15, canal_venta_aplicado: "Minorista", monto_total_venta: 940320, monto_abonado: 500000, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Transferencia", estado_venta: "ENTREGADO_TOTAL", precios_congelados: true, cantidad_items: 2, facturas: [], comprobantes: "—", observaciones: "Entregado completo, pendiente facturar", items: MOCK_ITEMS_503 },
+  { id_venta: 502, fecha_venta: "2026-09-06", cliente_razon_social: "Moto Parts Express", cliente_cuit: "30-74567890-2", id_cliente: 16, canal_venta_aplicado: "Agencia", monto_total_venta: 763130, monto_abonado: 0, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Cheque", estado_venta: "ENTREGADO_PARCIAL", precios_congelados: true, cantidad_items: 2, facturas: [], comprobantes: "—", observaciones: "Entrega parcial - solo EGR, bujías pendientes", items: MOCK_ITEMS_502 },
+  { id_venta: 501, fecha_venta: "2026-09-04", cliente_razon_social: "Repuestos El Sol S.R.L.", cliente_cuit: "30-71234567-8", id_cliente: 12, canal_venta_aplicado: "Efectivo", monto_total_venta: 162624, monto_abonado: 100000, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Efectivo", estado_venta: "COMPLETADO", precios_congelados: true, cantidad_items: 2, facturas: ["FC-A-0001-4512"], comprobantes: "FC-A-0001-4512", observaciones: "", items: MOCK_ITEMS_501 },
+  { id_venta: 500, fecha_venta: "2026-09-03", cliente_razon_social: "AutoCenter S.A.", cliente_cuit: "30-72345678-9", id_cliente: 13, canal_venta_aplicado: "Mayorista", monto_total_venta: 485200, monto_abonado: 485200, descuento_general_porcentaje: 5, descuento_general_monto: 25537, forma_pago: "Cuenta Corriente", estado_venta: "COMPLETADO", precios_congelados: true, cantidad_items: 2, facturas: ["FC-A-0001-4511"], comprobantes: "FC-A-0001-4511", observaciones: "", items: MOCK_ITEMS_500 },
+  { id_venta: 499, fecha_venta: "2026-09-02", cliente_razon_social: "Distribuidora Norte", cliente_cuit: "30-73456789-0", id_cliente: 14, canal_venta_aplicado: "MercadoLibre", monto_total_venta: 95400, monto_abonado: 0, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Transferencia", estado_venta: "PENDIENTE_ENTREGA_CLIENTE", precios_congelados: true, cantidad_items: 1, facturas: [], comprobantes: "—", observaciones: "", items: MOCK_ITEMS_499 },
+  { id_venta: 498, fecha_venta: "2026-09-01", cliente_razon_social: "Taller Méndez", cliente_cuit: "20-28456789-1", id_cliente: 15, canal_venta_aplicado: "Minorista", monto_total_venta: 0, monto_abonado: 0, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Tarjeta", estado_venta: "NOTA_DE_PEDIDO", precios_congelados: false, cantidad_items: 3, facturas: [], comprobantes: "—", observaciones: "Pedido sin presupuesto previo", items: MOCK_ITEMS_498 },
+  { id_venta: 497, fecha_venta: "2026-08-31", cliente_razon_social: "Moto Parts Express", cliente_cuit: "30-74567890-2", id_cliente: 16, canal_venta_aplicado: "Agencia", monto_total_venta: 1200000, monto_abonado: 0, descuento_general_porcentaje: 10, descuento_general_monto: 133333, forma_pago: "Cheque", estado_venta: "PRESUPUESTO", precios_congelados: true, cantidad_items: 3, facturas: [], comprobantes: "—", observaciones: "Cotización grande", items: MOCK_ITEMS_497 },
+  { id_venta: 496, fecha_venta: "2026-08-30", cliente_razon_social: "Repuestos El Sol S.R.L.", cliente_cuit: "30-71234567-8", id_cliente: 12, canal_venta_aplicado: "Efectivo", monto_total_venta: 78300, monto_abonado: 0, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Efectivo", estado_venta: "ANULADO", precios_congelados: true, cantidad_items: 1, facturas: [], comprobantes: "—", observaciones: "Error de carga", items: [] },
+  { id_venta: 495, fecha_venta: "2026-08-29", cliente_razon_social: "AutoCenter S.A.", cliente_cuit: "30-72345678-9", id_cliente: 13, canal_venta_aplicado: "Mayorista", monto_total_venta: 310500, monto_abonado: 310500, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Cuenta Corriente", estado_venta: "DEVOLUCION_PARCIAL", precios_congelados: true, cantidad_items: 4, facturas: ["FC-A-0001-4506", "NC-A-0001-101"], comprobantes: "FC-A-0001-4506, NC-A-0001-101", observaciones: "", items: [] },
+  { id_venta: 494, fecha_venta: "2026-08-28", cliente_razon_social: "Distribuidora Norte", cliente_cuit: "30-73456789-0", id_cliente: 14, canal_venta_aplicado: "Efectivo", monto_total_venta: 44800, monto_abonado: 0, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Efectivo", estado_venta: "PENDIENTE_RECIBO_MERCADERIA", precios_congelados: true, cantidad_items: 2, facturas: [], comprobantes: "—", observaciones: "Esperando proveedor", items: MOCK_ITEMS_494 },
+  { id_venta: 493, fecha_venta: "2026-08-27", cliente_razon_social: "Taller Méndez", cliente_cuit: "20-28456789-1", id_cliente: 15, canal_venta_aplicado: "Minorista", monto_total_venta: 162624, monto_abonado: 80000, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Transferencia", estado_venta: "ENTREGADO_TOTAL", precios_congelados: true, cantidad_items: 2, facturas: ["FC-A-0001-4509"], comprobantes: "FC-A-0001-4509", observaciones: "Facturado parcial", items: MOCK_ITEMS_493 },
+  { id_venta: 492, fecha_venta: "2026-08-26", cliente_razon_social: "Moto Parts Express", cliente_cuit: "30-74567890-2", id_cliente: 16, canal_venta_aplicado: "Agencia", monto_total_venta: 847000, monto_abonado: 0, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Cheque", estado_venta: "ENTREGADO_PARCIAL", precios_congelados: true, cantidad_items: 2, facturas: [], comprobantes: "—", observaciones: "Entrega parcial - bujías anuladas", items: MOCK_ITEMS_492 },
+  { id_venta: 491, fecha_venta: "2026-08-25", cliente_razon_social: "Distribuidora Norte", cliente_cuit: "30-73456789-0", id_cliente: 14, canal_venta_aplicado: "Efectivo", monto_total_venta: 508200, monto_abonado: 508200, descuento_general_porcentaje: 0, descuento_general_monto: 0, forma_pago: "Efectivo", estado_venta: "COMPLETADO", precios_congelados: true, cantidad_items: 2, facturas: [], comprobantes: "—", observaciones: "Completada sin factura", items: MOCK_ITEMS_491 },
 ];
 
 const MOCK_PRODUCTOS = [
@@ -145,6 +283,81 @@ const MOCK_PRODUCTOS = [
   { codigo_producto: "REP-5501", descripcion: "Bujía de encendido iridium", precio_usd_lista: 8.5 },
   { codigo_producto: "REP-3300", descripcion: "Correa de distribución reforzada", precio_usd_lista: 65.0 },
 ];
+
+const MOCK_FACTURAS: Record<string, FacturaVentaDetail> = {
+  "FC-A-0001-4512": {
+    numero_comprobante: "FC-A-0001-4512",
+    tipo_comprobante: "FACTURA",
+    tipo_letra: "A",
+    fecha_emision: "2026-09-04",
+    cliente_razon_social: "Repuestos El Sol S.R.L.",
+    monto_subtotal: 134400,
+    monto_iva: 28224,
+    monto_total_factura: 162624,
+    estado_cobro: "COBRADA",
+    items: [
+      { id_venta: 501, codigo_producto: "REP-8834", descripcion: "Filtro de Aceite sintético reforzado V2", cantidad: 5, precio_unitario: 63840, monto_iva: 13406, monto_total: 77246 },
+      { id_venta: 501, codigo_producto: "REP-1201", descripcion: "Pastillas de freno delanteras cerámicas", cantidad: 3, precio_unitario: 44800, monto_iva: 9408, monto_total: 54208 },
+    ],
+  },
+  "FC-A-0001-4511": {
+    numero_comprobante: "FC-A-0001-4511",
+    tipo_comprobante: "FACTURA",
+    tipo_letra: "A",
+    fecha_emision: "2026-09-03",
+    cliente_razon_social: "AutoCenter S.A.",
+    monto_subtotal: 401000,
+    monto_iva: 84210,
+    monto_total_factura: 485200,
+    estado_cobro: "COBRADA",
+    items: [
+      { id_venta: 500, codigo_producto: "REP-8834", descripcion: "Filtro de Aceite sintético reforzado V2", cantidad: 10, precio_unitario: 60480, monto_iva: 12701, monto_total: 73181 },
+      { id_venta: 500, codigo_producto: "REP-9999", descripcion: "Válvula EGR electrónica", cantidad: 2, precio_unitario: 175000, monto_iva: 36750, monto_total: 211750 },
+    ],
+  },
+  "FC-A-0001-4506": {
+    numero_comprobante: "FC-A-0001-4506",
+    tipo_comprobante: "FACTURA",
+    tipo_letra: "A",
+    fecha_emision: "2026-08-29",
+    cliente_razon_social: "AutoCenter S.A.",
+    monto_subtotal: 256611,
+    monto_iva: 53888,
+    monto_total_factura: 310500,
+    estado_cobro: "COBRADA",
+    items: [
+      { id_venta: 495, codigo_producto: "REP-8834", descripcion: "Filtro de Aceite sintético reforzado V2", cantidad: 4, precio_unitario: 64153, monto_iva: 13472, monto_total: 77625 },
+    ],
+  },
+  "NC-A-0001-101": {
+    numero_comprobante: "NC-A-0001-101",
+    tipo_comprobante: "NOTA_CREDITO",
+    tipo_letra: "A",
+    fecha_emision: "2026-08-30",
+    cliente_razon_social: "AutoCenter S.A.",
+    monto_subtotal: -45000,
+    monto_iva: -9450,
+    monto_total_factura: -54450,
+    estado_cobro: "APLICADA",
+    items: [
+      { id_venta: 495, codigo_producto: "REP-1201", descripcion: "Pastillas de freno delanteras cerámicas", cantidad: 1, precio_unitario: 45000, monto_iva: 9450, monto_total: 54450 },
+    ],
+  },
+  "FC-A-0001-4509": {
+    numero_comprobante: "FC-A-0001-4509",
+    tipo_comprobante: "FACTURA",
+    tipo_letra: "A",
+    fecha_emision: "2026-08-27",
+    cliente_razon_social: "Taller Méndez",
+    monto_subtotal: 80000,
+    monto_iva: 16800,
+    monto_total_factura: 96800,
+    estado_cobro: "PENDIENTE",
+    items: [
+      { id_venta: 493, codigo_producto: "REP-8834", descripcion: "Filtro de Aceite sintético reforzado V2", cantidad: 3, precio_unitario: 67200, monto_iva: 14112, monto_total: 81312 },
+    ],
+  },
+};
 
 /* ------------------------------------------------------------------ */
 /*  Page component                                                     */
@@ -160,15 +373,44 @@ type ModalState =
   | { type: "cambio_estado"; venta: Venta }
   | { type: "devolucion"; venta: Venta }
   | { type: "pendiente_recibo"; venta: Venta }
-  | { type: "completar"; venta: Venta };
+  | { type: "completar"; venta: Venta }
+  | { type: "facturar"; ventas: Venta[] }
+  | { type: "factura_detail"; factura: FacturaVentaDetail }
+  | { type: "detalle"; venta: Venta };
 
 export default function VentasPage() {
   const [records, setRecords] = useState<Venta[]>(MOCK);
   const [search, setSearch] = useState("");
   const [filterEstado, setFilterEstado] = useState("");
+  const [filterFechaDesde, setFilterFechaDesde] = useState("");
+  const [filterFechaHasta, setFilterFechaHasta] = useState("");
+  const [filterClientes, setFilterClientes] = useState<Set<string>>(new Set());
+  const [filterVentaIds, setFilterVentaIds] = useState<Set<string>>(new Set());
+  const [filterCanal, setFilterCanal] = useState("");
+  const [filterPago, setFilterPago] = useState("");
+  const [filterMargen, setFilterMargen] = useState("");
+  const [filterSaldo, setFilterSaldo] = useState("");
+  const [filterFacturas, setFilterFacturas] = useState<Set<string>>(new Set());
   const [page, setPage] = useState(1);
   const [modal, setModal] = useState<ModalState>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  const canales = useMemo(() => [...new Set(records.map((r) => r.canal_venta_aplicado))].sort(), [records]);
+  const formasPago = useMemo(() => [...new Set(records.map((r) => r.forma_pago))].sort(), [records]);
+  const clienteOptions = useMemo(() => {
+    const map = new Map<number, { razon_social: string; cuit: string }>();
+    records.forEach((r) => { if (!map.has(r.id_cliente)) map.set(r.id_cliente, { razon_social: r.cliente_razon_social, cuit: r.cliente_cuit }); });
+    return [...map.entries()].map(([id, c]) => ({ value: String(id), label: `${c.razon_social} (${c.cuit})` })).sort((a, b) => a.label.localeCompare(b.label));
+  }, [records]);
+  const ventaIdOptions = useMemo(() => records.map((r) => ({ value: String(r.id_venta), label: `#${r.id_venta}` })), [records]);
+  const facturaOptions = useMemo(() => {
+    const all = new Set<string>();
+    records.forEach((r) => r.facturas.forEach((f) => all.add(f)));
+    return [...all].sort().map((f) => ({ value: f, label: f }));
+  }, [records]);
+
+  const hasAnyFilter = !!(filterEstado || filterFechaDesde || filterFechaHasta || filterClientes.size || filterVentaIds.size || filterCanal || filterPago || filterMargen || filterSaldo || filterFacturas.size);
 
   const filtered = useMemo(() => {
     let result = records;
@@ -185,12 +427,105 @@ export default function VentasPage() {
     if (filterEstado) {
       result = result.filter((r) => r.estado_venta === filterEstado);
     }
+    if (filterFechaDesde) {
+      result = result.filter((r) => r.fecha_venta >= filterFechaDesde);
+    }
+    if (filterFechaHasta) {
+      result = result.filter((r) => r.fecha_venta <= filterFechaHasta);
+    }
+    if (filterClientes.size) {
+      result = result.filter((r) => filterClientes.has(String(r.id_cliente)));
+    }
+    if (filterVentaIds.size) {
+      result = result.filter((r) => filterVentaIds.has(String(r.id_venta)));
+    }
+    if (filterCanal) {
+      result = result.filter((r) => r.canal_venta_aplicado === filterCanal);
+    }
+    if (filterPago) {
+      result = result.filter((r) => r.forma_pago === filterPago);
+    }
+    if (filterMargen) {
+      result = result.filter((r) => {
+        const itemsConMargen = r.items.filter((i) => i.margen_porcentaje != null && i.precio_unitario_sin_iva > 0);
+        const avg = itemsConMargen.length ? itemsConMargen.reduce((s, i) => s + (i.margen_porcentaje ?? 0), 0) / itemsConMargen.length : 0;
+        return applyNumericFilter(avg, filterMargen);
+      });
+    }
+    if (filterSaldo) {
+      result = result.filter((r) => applyNumericFilter(r.monto_total_venta - r.monto_abonado, filterSaldo));
+    }
+    if (filterFacturas.size) {
+      result = result.filter((r) => r.facturas.some((f) => filterFacturas.has(f)));
+    }
     return result;
-  }, [records, search, filterEstado]);
+  }, [records, search, filterEstado, filterFechaDesde, filterFechaHasta, filterClientes, filterVentaIds, filterCanal, filterPago, filterMargen, filterSaldo, filterFacturas]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const paginated = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  function isFacturable(v: Venta) {
+    return v.estado_venta === "ENTREGADO_PARCIAL" || v.estado_venta === "ENTREGADO_TOTAL";
+  }
+  function isFullyInvoiced(v: Venta) {
+    if (!v.items.length) return true;
+    return v.items.filter((i) => i.estado_item !== "ANULADO").every((i) => i.cantidad_facturada >= i.cantidad);
+  }
+  function canSelect(v: Venta) {
+    return isFacturable(v) && !isFullyInvoiced(v);
+  }
+
+  function toggleSelect(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+  function toggleSelectAll() {
+    const selectableOnPage = paginated.filter(canSelect);
+    const allSelected = selectableOnPage.every((v) => selectedIds.has(v.id_venta));
+    if (allSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        selectableOnPage.forEach((v) => next.delete(v.id_venta));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        selectableOnPage.forEach((v) => next.add(v.id_venta));
+        return next;
+      });
+    }
+  }
+
+  function handleFacturar(itemsFacturados: { id_venta: number; id_detalle_venta: number; cantidad: number }[]) {
+    const nextNum = `FC-A-0001-${(4520 + Math.floor(Math.random() * 100)).toString()}`;
+    setRecords(
+      records.map((r) => {
+        const itemsDeEstaVenta = itemsFacturados.filter((f) => f.id_venta === r.id_venta);
+        if (!itemsDeEstaVenta.length) return r;
+        const updatedItems = r.items.map((i) => {
+          const match = itemsDeEstaVenta.find((f) => f.id_detalle_venta === i.id_detalle_venta);
+          if (!match) return i;
+          return { ...i, cantidad_facturada: i.cantidad_facturada + match.cantidad };
+        });
+        const allInvoiced = updatedItems.filter((i) => i.estado_item !== "ANULADO").every((i) => i.cantidad_facturada >= i.cantidad);
+        return {
+          ...r,
+          items: updatedItems,
+          facturas: [...r.facturas, nextNum],
+          comprobantes: [...r.facturas, nextNum].join(", "),
+          estado_venta: allInvoiced ? "COMPLETADO" : r.estado_venta,
+        };
+      }),
+    );
+    setModal(null);
+    setSelectedIds(new Set());
+    flash(`Factura ${nextNum} generada`);
+  }
 
   function flash(msg: string) {
     setToast(msg);
@@ -266,6 +601,15 @@ export default function VentasPage() {
       });
     }
 
+    const preCompletado = ["PRESUPUESTO", "NOTA_DE_PEDIDO", "PENDIENTE_RECIBO_MERCADERIA", "PENDIENTE_ENTREGA_CLIENTE", "ENTREGADO_PARCIAL", "ENTREGADO_TOTAL"];
+    if (preCompletado.includes(venta.estado_venta) && venta.items.some((i) => i.estado_item !== "ANULADO")) {
+      actions.push({
+        label: "Anular Ítems",
+        onClick: () => setModal({ type: "anular_items", venta } as any),
+        variant: "danger",
+      });
+    }
+
     for (const t of trans) {
       if (t === "ANULADO") continue;
       if (t === "DEVOLUCION" || t === "DEVOLUCION_PARCIAL") {
@@ -283,6 +627,14 @@ export default function VentasPage() {
           label: "Pend. Recibo",
           onClick: () => setModal({ type: "pendiente_recibo", venta }),
           variant: "default",
+        });
+        continue;
+      }
+      if (t === "ENTREGADO_PARCIAL" || t === "ENTREGADO_TOTAL") {
+        actions.push({
+          label: ESTADO_LABELS[t] ?? t,
+          onClick: () => setModal({ type: "entrega", venta, tipoEntrega: t } as any),
+          variant: t === "ENTREGADO_TOTAL" ? "success" : "default",
         });
         continue;
       }
@@ -319,16 +671,6 @@ export default function VentasPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <h1 className="font-display text-2xl font-bold uppercase tracking-wide">Ventas</h1>
           <div className="flex flex-wrap items-center gap-3">
-            <select
-              value={filterEstado}
-              onChange={(e) => { setFilterEstado(e.target.value); setPage(1); }}
-              className="h-10 border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]"
-            >
-              <option value="">Todos los estados</option>
-              {Object.entries(ESTADO_LABELS).map(([k, v]) => (
-                <option key={k} value={k}>{v}</option>
-              ))}
-            </select>
             <input
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(1); }}
@@ -342,6 +684,18 @@ export default function VentasPage() {
             >
               + Nueva Venta
             </button>
+            {selectedIds.size > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  const selectedVentas = records.filter((r) => selectedIds.has(r.id_venta));
+                  setModal({ type: "facturar", ventas: selectedVentas });
+                }}
+                className="h-10 bg-emerald-600 px-5 text-sm font-semibold uppercase tracking-wide text-white hover:bg-emerald-700"
+              >
+                Facturar ({selectedIds.size})
+              </button>
+            )}
           </div>
         </div>
 
@@ -350,6 +704,9 @@ export default function VentasPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-[#f6f6f6] text-left">
+                <th className="border-b border-honda-line px-2 py-3 text-center">
+                  <input type="checkbox" checked={paginated.filter(canSelect).length > 0 && paginated.filter(canSelect).every((v) => selectedIds.has(v.id_venta))} onChange={toggleSelectAll} className="h-4 w-4 accent-[#CC0000]" />
+                </th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">#</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Fecha</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Cliente</th>
@@ -360,13 +717,64 @@ export default function VentasPage() {
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Pago</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Estado</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Items</th>
+                <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Facturas</th>
                 <th className="border-b border-honda-line px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide">Acciones</th>
+              </tr>
+              {/* FILA DE FILTROS POR COLUMNA */}
+              <tr className="bg-[#fafafa]">
+                <th className="border-b border-honda-line px-2 py-2" />
+                <th className="border-b border-honda-line px-2 py-2">
+                  <MultiSelectFilter options={ventaIdOptions} selected={filterVentaIds} onChange={(s) => { setFilterVentaIds(s); setPage(1); }} placeholder="#" />
+                </th>
+                <th className="border-b border-honda-line px-2 py-2">
+                  <div className="flex gap-1">
+                    <input type="date" value={filterFechaDesde} onChange={(e) => { setFilterFechaDesde(e.target.value); setPage(1); }} className="h-7 w-full border border-honda-line px-1 text-[10px] outline-none focus:border-[#CC0000]" title="Desde" />
+                    <input type="date" value={filterFechaHasta} onChange={(e) => { setFilterFechaHasta(e.target.value); setPage(1); }} className="h-7 w-full border border-honda-line px-1 text-[10px] outline-none focus:border-[#CC0000]" title="Hasta" />
+                  </div>
+                </th>
+                <th className="border-b border-honda-line px-2 py-2">
+                  <MultiSelectFilter options={clienteOptions} selected={filterClientes} onChange={(s) => { setFilterClientes(s); setPage(1); }} placeholder="Clientes" />
+                </th>
+                <th className="border-b border-honda-line px-2 py-2">
+                  <select value={filterCanal} onChange={(e) => { setFilterCanal(e.target.value); setPage(1); }} className="h-7 w-full border border-honda-line bg-white px-1 text-xs outline-none focus:border-[#CC0000]">
+                    <option value="">Todos</option>
+                    {canales.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </th>
+                <th className="border-b border-honda-line px-2 py-2" />
+                <th className="border-b border-honda-line px-2 py-2">
+                  <NumericFilter value={filterMargen} onChange={(v) => { setFilterMargen(v); setPage(1); }} placeholder=">30, <10..." />
+                </th>
+                <th className="border-b border-honda-line px-2 py-2">
+                  <NumericFilter value={filterSaldo} onChange={(v) => { setFilterSaldo(v); setPage(1); }} placeholder=">0, =0..." />
+                </th>
+                <th className="border-b border-honda-line px-2 py-2">
+                  <select value={filterPago} onChange={(e) => { setFilterPago(e.target.value); setPage(1); }} className="h-7 w-full border border-honda-line bg-white px-1 text-xs outline-none focus:border-[#CC0000]">
+                    <option value="">Todos</option>
+                    {formasPago.map((f) => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </th>
+                <th className="border-b border-honda-line px-2 py-2">
+                  <select value={filterEstado} onChange={(e) => { setFilterEstado(e.target.value); setPage(1); }} className="h-7 w-full border border-honda-line bg-white px-1 text-xs outline-none focus:border-[#CC0000]">
+                    <option value="">Todos</option>
+                    {Object.entries(ESTADO_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                  </select>
+                </th>
+                <th className="border-b border-honda-line px-2 py-2" />
+                <th className="border-b border-honda-line px-2 py-2">
+                  <MultiSelectFilter options={facturaOptions} selected={filterFacturas} onChange={(s) => { setFilterFacturas(s); setPage(1); }} placeholder="Facturas" />
+                </th>
+                <th className="border-b border-honda-line px-2 py-2 text-right">
+                  {hasAnyFilter && (
+                    <button type="button" onClick={() => { setFilterEstado(""); setFilterFechaDesde(""); setFilterFechaHasta(""); setFilterClientes(new Set()); setFilterVentaIds(new Set()); setFilterCanal(""); setFilterPago(""); setFilterMargen(""); setFilterSaldo(""); setFilterFacturas(new Set()); setPage(1); }} className="text-[10px] font-medium text-[#CC0000] hover:underline">Limpiar</button>
+                  )}
+                </th>
               </tr>
             </thead>
             <tbody>
               {paginated.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="px-4 py-8 text-center text-honda-muted">
+                  <td colSpan={13} className="px-4 py-8 text-center text-honda-muted">
                     Sin resultados
                   </td>
                 </tr>
@@ -375,7 +783,18 @@ export default function VentasPage() {
                   const actions = getAvailableActions(venta);
                   return (
                     <tr key={venta.id_venta} className="border-b border-honda-line hover:bg-[#fafafa]">
-                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">{venta.id_venta}</td>
+                      <td className="px-2 py-3 text-center">
+                        {canSelect(venta) ? (
+                          <input type="checkbox" checked={selectedIds.has(venta.id_venta)} onChange={() => toggleSelect(venta.id_venta)} className="h-4 w-4 accent-[#CC0000]" />
+                        ) : (
+                          <input type="checkbox" disabled className="h-4 w-4 opacity-30" title={isFacturable(venta) ? "Todo facturado" : "No facturable en este estado"} />
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">
+                        <button type="button" onClick={() => setModal({ type: "detalle", venta })} className="text-[#CC0000] underline decoration-[#CC0000]/30 hover:decoration-[#CC0000]">
+                          {venta.id_venta}
+                        </button>
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3">{fmtDate(venta.fecha_venta)}</td>
                       <td className="px-4 py-3">
                         <div className="text-sm">{venta.cliente_razon_social}</div>
@@ -421,6 +840,27 @@ export default function VentasPage() {
                         </span>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-center">{venta.cantidad_items}</td>
+                      <td className="px-4 py-3 text-xs">
+                        {venta.facturas.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {venta.facturas.map((f) => (
+                              <button
+                                key={f}
+                                type="button"
+                                onClick={() => {
+                                  const detail = MOCK_FACTURAS[f];
+                                  if (detail) setModal({ type: "factura_detail", factura: detail });
+                                }}
+                                className="inline-block cursor-pointer rounded bg-green-50 px-1.5 py-0.5 text-[10px] font-medium text-green-700 ring-1 ring-green-200 transition-colors hover:bg-green-100 hover:ring-green-300"
+                              >
+                                {f}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-honda-muted">—</span>
+                        )}
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
                         <ActionsDropdown actions={actions} />
                       </td>
@@ -507,12 +947,80 @@ export default function VentasPage() {
               setRecords(
                 records.map((r) =>
                   r.id_venta === modal.venta.id_venta
-                    ? { ...r, estado_venta: "COMPLETADO", monto_abonado: data.montoAbonado, facturada: data.facturar }
+                    ? { ...r, estado_venta: "COMPLETADO", monto_abonado: data.montoAbonado }
                     : r,
                 ),
               );
               setModal(null);
-              flash(`Venta #${modal.venta.id_venta} completada${data.facturar ? " y facturada" : ""}`);
+              flash(`Venta #${modal.venta.id_venta} completada`);
+            }}
+            onClose={() => setModal(null)}
+          />
+        )}
+        {modal?.type === "facturar" && (
+          <FacturarModal
+            ventas={modal.ventas}
+            onConfirm={handleFacturar}
+            onClose={() => setModal(null)}
+          />
+        )}
+        {modal?.type === "factura_detail" && (
+          <FacturaDetailModal
+            factura={modal.factura}
+            onClose={() => setModal(null)}
+          />
+        )}
+        {modal?.type === "detalle" && (
+          <VentaDetalleModal
+            venta={modal.venta}
+            onClose={() => setModal(null)}
+            onClickFactura={(f) => {
+              const detail = MOCK_FACTURAS[f];
+              if (detail) setModal({ type: "factura_detail", factura: detail });
+            }}
+          />
+        )}
+        {(modal as any)?.type === "entrega" && (
+          <EntregaModal
+            venta={(modal as any).venta}
+            tipoEntrega={(modal as any).tipoEntrega}
+            onConfirm={(items) => {
+              const venta = (modal as any).venta as Venta;
+              const tipo = (modal as any).tipoEntrega as string;
+              setRecords(
+                records.map((r) => {
+                  if (r.id_venta !== venta.id_venta) return r;
+                  const updatedItems = r.items.map((i) => {
+                    const match = items.find((e: any) => e.id_detalle_venta === i.id_detalle_venta);
+                    if (!match) return i;
+                    return { ...i, estado_item: "ENTREGADO", cantidad_entregada: i.cantidad_entregada + match.cantidad_entregada };
+                  });
+                  return { ...r, items: updatedItems, estado_venta: tipo };
+                }),
+              );
+              setModal(null);
+              flash(`Venta #${venta.id_venta} → ${ESTADO_LABELS[tipo]}`);
+            }}
+            onClose={() => setModal(null)}
+          />
+        )}
+        {(modal as any)?.type === "anular_items" && (
+          <AnularItemsModal
+            venta={(modal as any).venta}
+            onConfirm={(itemIds: number[]) => {
+              const venta = (modal as any).venta as Venta;
+              setRecords(
+                records.map((r) => {
+                  if (r.id_venta !== venta.id_venta) return r;
+                  const updatedItems = r.items.map((i) =>
+                    itemIds.includes(i.id_detalle_venta) ? { ...i, estado_item: "ANULADO" } : i,
+                  );
+                  const allAnulados = updatedItems.every((i) => i.estado_item === "ANULADO");
+                  return { ...r, items: updatedItems, estado_venta: allAnulados ? "ANULADO" : r.estado_venta };
+                }),
+              );
+              setModal(null);
+              flash(`${itemIds.length} ítem(s) anulado(s) de venta #${venta.id_venta}`);
             }}
             onClose={() => setModal(null)}
           />
@@ -600,6 +1108,9 @@ function CreateVentaModal({
         descuento_monto: preciosCongelados ? descArsVal : 0,
         monto_iva: preciosCongelados ? iva * item.cantidad : 0,
         monto_total_linea: preciosCongelados ? (precioFinal + iva) * item.cantidad : 0,
+        estado_item: "PENDIENTE",
+        cantidad_entregada: 0,
+        cantidad_facturada: 0,
       };
     });
 
@@ -623,8 +1134,8 @@ function CreateVentaModal({
       estado_venta: estadoInicial,
       precios_congelados: preciosCongelados,
       monto_abonado: 0,
-      facturada: false,
       cantidad_items: items.length,
+      facturas: [],
       comprobantes: "—",
       observaciones: String(fd.get("observaciones") ?? ""),
       items: ventaItems,
@@ -634,7 +1145,7 @@ function CreateVentaModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-10 pb-8">
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-10 pb-8" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form
         onSubmit={handleSubmit}
         className="relative w-full max-w-4xl bg-white shadow-xl"
@@ -952,6 +1463,9 @@ function EditVentaModal({
         descuento_monto: venta.precios_congelados ? descArsVal : 0,
         monto_iva: venta.precios_congelados ? iva * item.cantidad : 0,
         monto_total_linea: venta.precios_congelados ? (precioFinal + iva) * item.cantidad : 0,
+        estado_item: existing?.estado_item ?? "PENDIENTE",
+        cantidad_entregada: existing?.cantidad_entregada ?? 0,
+        cantidad_facturada: existing?.cantidad_facturada ?? 0,
       };
     });
 
@@ -975,7 +1489,7 @@ function EditVentaModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-10 pb-8">
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-10 pb-8" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form
         onSubmit={handleSubmit}
         className="relative w-full max-w-4xl bg-white shadow-xl"
@@ -1224,7 +1738,7 @@ function CompletarVentaModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center bg-black/40 pt-24">
+    <div className="fixed inset-0 z-[90] flex items-start justify-center bg-black/40 pt-24" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form onSubmit={handleSubmit} className="w-full max-w-md bg-white p-6 shadow-xl sm:p-8">
         <h2 className="font-display text-xl font-bold uppercase tracking-wide text-green-700">
           Completar Venta #{venta.id_venta}
@@ -1304,7 +1818,7 @@ function AnularVentaModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center bg-black/40 pt-24">
+    <div className="fixed inset-0 z-[90] flex items-start justify-center bg-black/40 pt-24" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-md bg-white p-6 shadow-xl sm:p-8">
         <h2 className="font-display text-xl font-bold uppercase tracking-wide text-red-700">
           Anular Venta #{venta.id_venta}
@@ -1398,6 +1912,654 @@ function ActionsDropdown({ actions }: { actions: ActionItem[] }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Facturar Modal (multi-venta)                                       */
+/* ------------------------------------------------------------------ */
+
+function FacturarModal({
+  ventas,
+  onConfirm,
+  onClose,
+}: {
+  ventas: Venta[];
+  onConfirm: (items: { id_venta: number; id_detalle_venta: number; cantidad: number }[]) => void;
+  onClose: () => void;
+}) {
+  type LineItem = {
+    id_venta: number;
+    id_detalle_venta: number;
+    codigo: string;
+    descripcion: string;
+    pendiente: number;
+    cantidad: number;
+    precio: number;
+    clienteNombre: string;
+  };
+
+  const [items, setItems] = useState<LineItem[]>(() => {
+    const lines: LineItem[] = [];
+    for (const v of ventas) {
+      for (const i of v.items) {
+        if (i.estado_item === "ANULADO") continue;
+        const pendiente = i.cantidad_entregada - i.cantidad_facturada;
+        if (pendiente <= 0) continue;
+        lines.push({
+          id_venta: v.id_venta,
+          id_detalle_venta: i.id_detalle_venta,
+          codigo: i.codigo_producto,
+          descripcion: i.descripcion_item,
+          pendiente,
+          cantidad: pendiente,
+          precio: i.precio_unitario_sin_iva,
+          clienteNombre: v.cliente_razon_social,
+        });
+      }
+    }
+    return lines;
+  });
+
+  const total = items.reduce((s, i) => s + i.cantidad * i.precio, 0);
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const toFacturar = items.filter((i) => i.cantidad > 0);
+    if (!toFacturar.length) return;
+    onConfirm(toFacturar.map((i) => ({ id_venta: i.id_venta, id_detalle_venta: i.id_detalle_venta, cantidad: i.cantidad })));
+  }
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-12 pb-12" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <form onSubmit={handleSubmit} className="w-full max-w-3xl bg-white p-6 shadow-xl sm:p-8">
+        <h2 className="font-display text-xl font-bold uppercase tracking-wide text-emerald-700">
+          Facturar
+        </h2>
+        <p className="mt-1 text-sm text-honda-muted">
+          {ventas.length} venta(s) seleccionada(s) — ítems pendientes de facturación
+        </p>
+
+        {items.length === 0 ? (
+          <p className="mt-6 text-center text-sm text-honda-muted">No hay ítems pendientes de facturación.</p>
+        ) : (
+          <div className="mt-4 overflow-x-auto border border-honda-line">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-[#f6f6f6] text-left">
+                  <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Venta</th>
+                  <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Código</th>
+                  <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Descripción</th>
+                  <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Pend.</th>
+                  <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Cant. a Facturar</th>
+                  <th className="border-b border-honda-line px-3 py-2 text-right text-xs font-semibold uppercase">Subtotal</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((item, idx) => (
+                  <tr key={`${item.id_venta}-${item.id_detalle_venta}`} className="border-b border-honda-line">
+                    <td className="px-3 py-2 font-mono text-xs">#{item.id_venta}</td>
+                    <td className="px-3 py-2 text-xs">{item.codigo}</td>
+                    <td className="px-3 py-2 text-xs">{item.descripcion}</td>
+                    <td className="px-3 py-2 text-center text-xs">{item.pendiente}</td>
+                    <td className="px-3 py-2 text-center">
+                      <input
+                        type="number"
+                        min={0}
+                        max={item.pendiente}
+                        value={item.cantidad}
+                        onChange={(e) => {
+                          const val = Math.min(Math.max(0, parseInt(e.target.value) || 0), item.pendiente);
+                          setItems((prev) => prev.map((p, i) => (i === idx ? { ...p, cantidad: val } : p)));
+                        }}
+                        className="h-8 w-16 border border-honda-line px-2 text-center text-xs outline-none focus:border-emerald-500"
+                      />
+                    </td>
+                    <td className="px-3 py-2 text-right text-xs font-medium">{formatARS(item.cantidad * item.precio)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="bg-[#f6f6f6]">
+                  <td colSpan={5} className="px-3 py-2 text-right text-xs font-semibold uppercase">Total</td>
+                  <td className="px-3 py-2 text-right text-sm font-bold">{formatARS(total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+
+        <div className="mt-6 flex gap-3">
+          <button
+            type="submit"
+            disabled={items.every((i) => i.cantidad === 0)}
+            className="h-10 bg-emerald-600 px-6 text-sm font-semibold uppercase tracking-wide text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Generar Factura
+          </button>
+          <button type="button" onClick={onClose} className="h-10 border border-honda-line px-6 text-sm font-semibold uppercase tracking-wide hover:bg-[#f6f6f6]">
+            Cancelar
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Venta Detalle Modal                                                */
+/* ------------------------------------------------------------------ */
+
+const ESTADO_ITEM_COLORS: Record<string, string> = {
+  PENDIENTE: "bg-gray-100 text-gray-600",
+  ENTREGADO: "bg-green-100 text-green-700",
+  ANULADO: "bg-red-100 text-red-600",
+};
+
+function VentaDetalleModal({
+  venta,
+  onClose,
+  onClickFactura,
+}: {
+  venta: Venta;
+  onClose: () => void;
+  onClickFactura: (f: string) => void;
+}) {
+  const saldo = venta.monto_total_venta - venta.monto_abonado;
+  const itemsActivos = venta.items.filter((i) => i.estado_item !== "ANULADO");
+  const totalEntregado = itemsActivos.reduce((s, i) => s + i.cantidad_entregada, 0);
+  const totalCantidad = itemsActivos.reduce((s, i) => s + i.cantidad, 0);
+  const totalFacturado = itemsActivos.reduce((s, i) => s + i.cantidad_facturada, 0);
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-8 pb-12" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-4xl bg-white shadow-xl">
+        {/* Header */}
+        <div className="bg-[#f6f6f6] px-6 py-5 sm:px-8">
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="font-display text-xl font-bold uppercase tracking-wide text-honda-ink">
+                Venta #{venta.id_venta}
+              </h2>
+              <p className="mt-1 text-sm text-honda-muted">
+                {venta.cliente_razon_social} — {venta.cliente_cuit}
+              </p>
+            </div>
+            <span className={`inline-block rounded px-2.5 py-1 text-xs font-semibold ${ESTADO_COLORS[venta.estado_venta] ?? "bg-gray-100 text-gray-700"}`}>
+              {ESTADO_LABELS[venta.estado_venta] ?? venta.estado_venta}
+            </span>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-2 text-sm sm:grid-cols-4">
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-honda-muted">Fecha</span>
+              <p className="font-medium">{fmtDate(venta.fecha_venta)}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-honda-muted">Canal</span>
+              <p className="font-medium">{venta.canal_venta_aplicado}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-honda-muted">Forma de Pago</span>
+              <p className="font-medium">{venta.forma_pago}</p>
+            </div>
+            <div>
+              <span className="text-[10px] font-semibold uppercase text-honda-muted">Precios</span>
+              <p className="font-medium">{venta.precios_congelados ? "Congelados" : "A definir"}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Financiero */}
+        <div className="grid grid-cols-2 gap-4 border-b border-honda-line px-6 py-4 sm:grid-cols-5 sm:px-8">
+          <div>
+            <span className="text-[10px] font-semibold uppercase text-honda-muted">Total</span>
+            <p className="text-sm font-bold">{venta.monto_total_venta > 0 ? formatARS(venta.monto_total_venta) : "Sin precio"}</p>
+          </div>
+          <div>
+            <span className="text-[10px] font-semibold uppercase text-honda-muted">Abonado</span>
+            <p className="text-sm font-bold text-green-700">{formatARS(venta.monto_abonado)}</p>
+          </div>
+          <div>
+            <span className="text-[10px] font-semibold uppercase text-honda-muted">Saldo</span>
+            <p className={`text-sm font-bold ${saldo > 0 ? "text-amber-700" : "text-green-700"}`}>
+              {saldo > 0 ? formatARS(saldo) : "Pagado"}
+            </p>
+          </div>
+          {(venta.descuento_general_porcentaje > 0 || venta.descuento_general_monto > 0) && (
+            <>
+              <div>
+                <span className="text-[10px] font-semibold uppercase text-honda-muted">Dto. General</span>
+                <p className="text-sm font-medium">
+                  {venta.descuento_general_porcentaje > 0 ? `${venta.descuento_general_porcentaje}%` : formatARS(venta.descuento_general_monto)}
+                </p>
+              </div>
+            </>
+          )}
+          <div>
+            <span className="text-[10px] font-semibold uppercase text-honda-muted">Progreso</span>
+            <p className="text-sm font-medium">{totalEntregado}/{totalCantidad} entregados · {totalFacturado}/{totalCantidad} facturados</p>
+          </div>
+        </div>
+
+        {/* Items */}
+        <div className="px-6 py-4 sm:px-8">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-honda-muted">Ítems ({venta.items.length})</h3>
+          {venta.items.length === 0 ? (
+            <p className="text-sm text-honda-muted">Sin ítems cargados.</p>
+          ) : (
+            <div className="overflow-x-auto border border-honda-line">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-[#f6f6f6] text-left">
+                    <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Código</th>
+                    <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Descripción</th>
+                    <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Cant.</th>
+                    <th className="border-b border-honda-line px-3 py-2 text-right text-xs font-semibold uppercase">P.U.</th>
+                    <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Dto.</th>
+                    <th className="border-b border-honda-line px-3 py-2 text-right text-xs font-semibold uppercase">Total Línea</th>
+                    <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Entregado</th>
+                    <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Facturado</th>
+                    <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {venta.items.map((item) => (
+                    <tr key={item.id_detalle_venta} className={`border-b border-honda-line ${item.estado_item === "ANULADO" ? "opacity-50" : ""}`}>
+                      <td className="px-3 py-2 font-mono text-xs">{item.codigo_producto}</td>
+                      <td className="px-3 py-2 text-xs">{item.descripcion_item}</td>
+                      <td className="px-3 py-2 text-center text-xs">{item.cantidad}</td>
+                      <td className="px-3 py-2 text-right text-xs">
+                        {item.precio_unitario_sin_iva > 0 ? formatARS(item.precio_unitario_sin_iva) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-center text-xs">
+                        {(item.descuento_porcentaje ?? 0) > 0
+                          ? `${item.descuento_porcentaje}%`
+                          : (item.descuento_monto ?? 0) > 0
+                            ? formatARS(item.descuento_monto!)
+                            : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right text-xs font-medium">
+                        {item.monto_total_linea > 0 ? formatARS(item.monto_total_linea) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-center text-xs">{item.cantidad_entregada}/{item.cantidad}</td>
+                      <td className="px-3 py-2 text-center text-xs">{item.cantidad_facturada}/{item.cantidad}</td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-medium ${ESTADO_ITEM_COLORS[item.estado_item] ?? "bg-gray-100 text-gray-600"}`}>
+                          {item.estado_item}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Facturas vinculadas */}
+        {venta.facturas.length > 0 && (
+          <div className="border-t border-honda-line px-6 py-4 sm:px-8">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-honda-muted">Facturas Vinculadas</h3>
+            <div className="flex flex-wrap gap-2">
+              {venta.facturas.map((f) => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => onClickFactura(f)}
+                  className="inline-flex items-center gap-1.5 rounded bg-green-50 px-3 py-1.5 text-xs font-medium text-green-700 ring-1 ring-green-200 transition-colors hover:bg-green-100 hover:ring-green-300"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                  {f}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Observaciones */}
+        {venta.observaciones && (
+          <div className="border-t border-honda-line px-6 py-4 sm:px-8">
+            <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-honda-muted">Observaciones</h3>
+            <p className="text-sm text-honda-gray">{venta.observaciones}</p>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="flex gap-3 border-t border-honda-line px-6 py-4 sm:px-8">
+          <button type="button" onClick={onClose} className="h-10 border border-honda-line px-6 text-sm font-semibold uppercase tracking-wide hover:bg-[#f6f6f6]">
+            Cerrar
+          </button>
+          <button type="button" onClick={() => alert("Exportar PDF — integración pendiente")} className="h-10 border border-honda-line px-6 text-sm font-semibold uppercase tracking-wide hover:bg-[#f6f6f6]">
+            Exportar PDF
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Factura Detail Modal                                               */
+/* ------------------------------------------------------------------ */
+
+function FacturaDetailModal({
+  factura,
+  onClose,
+}: {
+  factura: FacturaVentaDetail;
+  onClose: () => void;
+}) {
+  const isNotaCredito = factura.tipo_comprobante === "NOTA_CREDITO";
+  const colorHeader = isNotaCredito ? "text-red-700" : "text-indigo-700";
+  const colorBg = isNotaCredito ? "bg-red-50" : "bg-indigo-50";
+  const tipoLabel = factura.tipo_comprobante === "FACTURA"
+    ? "Factura"
+    : factura.tipo_comprobante === "NOTA_CREDITO"
+      ? "Nota de Crédito"
+      : "Nota de Débito";
+
+  const estadoColor = factura.estado_cobro === "COBRADA" || factura.estado_cobro === "APLICADA"
+    ? "bg-green-100 text-green-700"
+    : factura.estado_cobro === "PENDIENTE"
+      ? "bg-amber-100 text-amber-700"
+      : "bg-gray-100 text-gray-600";
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-12 pb-12" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-2xl bg-white shadow-xl">
+        {/* Header */}
+        <div className={`${colorBg} px-6 py-5 sm:px-8`}>
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className={`font-display text-xl font-bold uppercase tracking-wide ${colorHeader}`}>
+                {tipoLabel} {factura.tipo_letra}
+              </h2>
+              <p className="mt-1 font-mono text-lg font-semibold text-honda-ink">
+                {factura.numero_comprobante}
+              </p>
+            </div>
+            <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${estadoColor}`}>
+              {factura.estado_cobro}
+            </span>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <span className="text-xs font-semibold uppercase text-honda-muted">Cliente</span>
+              <p className="font-medium text-honda-ink">{factura.cliente_razon_social}</p>
+            </div>
+            <div>
+              <span className="text-xs font-semibold uppercase text-honda-muted">Fecha Emisión</span>
+              <p className="font-medium text-honda-ink">{fmtDate(factura.fecha_emision)}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Items */}
+        <div className="px-6 py-4 sm:px-8">
+          <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-honda-muted">Detalle</h3>
+          <div className="overflow-x-auto border border-honda-line">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-[#f6f6f6] text-left">
+                  <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Venta</th>
+                  <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Código</th>
+                  <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Descripción</th>
+                  <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Cant.</th>
+                  <th className="border-b border-honda-line px-3 py-2 text-right text-xs font-semibold uppercase">P.U.</th>
+                  <th className="border-b border-honda-line px-3 py-2 text-right text-xs font-semibold uppercase">IVA</th>
+                  <th className="border-b border-honda-line px-3 py-2 text-right text-xs font-semibold uppercase">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {factura.items.map((item, idx) => (
+                  <tr key={idx} className="border-b border-honda-line">
+                    <td className="px-3 py-2 font-mono text-xs">#{item.id_venta}</td>
+                    <td className="px-3 py-2 text-xs">{item.codigo_producto}</td>
+                    <td className="px-3 py-2 text-xs">{item.descripcion}</td>
+                    <td className="px-3 py-2 text-center text-xs">{item.cantidad}</td>
+                    <td className="px-3 py-2 text-right text-xs">{formatARS(item.precio_unitario)}</td>
+                    <td className="px-3 py-2 text-right text-xs">{formatARS(item.monto_iva)}</td>
+                    <td className="px-3 py-2 text-right text-xs font-medium">{formatARS(item.monto_total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Totals */}
+          <div className="mt-4 flex justify-end">
+            <div className="w-64 space-y-1 text-sm">
+              <div className="flex justify-between text-honda-muted">
+                <span>Subtotal</span>
+                <span>{formatARS(Math.abs(factura.monto_subtotal))}</span>
+              </div>
+              <div className="flex justify-between text-honda-muted">
+                <span>IVA 21%</span>
+                <span>{formatARS(Math.abs(factura.monto_iva))}</span>
+              </div>
+              <div className="flex justify-between border-t border-honda-line pt-1 font-bold text-honda-ink">
+                <span>Total</span>
+                <span className={isNotaCredito ? "text-red-700" : ""}>{isNotaCredito ? "- " : ""}{formatARS(Math.abs(factura.monto_total_factura))}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex gap-3 border-t border-honda-line px-6 py-4 sm:px-8">
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-10 border border-honda-line px-6 text-sm font-semibold uppercase tracking-wide hover:bg-[#f6f6f6]"
+          >
+            Cerrar
+          </button>
+          <button
+            type="button"
+            onClick={() => alert("Exportar PDF — integración pendiente")}
+            className="h-10 border border-honda-line px-6 text-sm font-semibold uppercase tracking-wide hover:bg-[#f6f6f6]"
+          >
+            Exportar PDF
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Entrega Modal                                                      */
+/* ------------------------------------------------------------------ */
+
+function EntregaModal({
+  venta,
+  tipoEntrega,
+  onConfirm,
+  onClose,
+}: {
+  venta: Venta;
+  tipoEntrega: string;
+  onConfirm: (items: { id_detalle_venta: number; cantidad_entregada: number }[]) => void;
+  onClose: () => void;
+}) {
+  const itemsPendientes = venta.items.filter((i) => i.estado_item === "PENDIENTE");
+  const [cantidades, setCantidades] = useState<Record<number, number>>(
+    Object.fromEntries(
+      itemsPendientes.map((i) => [i.id_detalle_venta, tipoEntrega === "ENTREGADO_TOTAL" ? i.cantidad - i.cantidad_entregada : 0]),
+    ),
+  );
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const result = Object.entries(cantidades)
+      .filter(([, v]) => v > 0)
+      .map(([k, v]) => ({ id_detalle_venta: Number(k), cantidad_entregada: v }));
+    if (!result.length) return;
+    onConfirm(result);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-12 pb-12" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <form onSubmit={handleSubmit} className="w-full max-w-2xl bg-white p-6 shadow-xl sm:p-8">
+        <h2 className="font-display text-xl font-bold uppercase tracking-wide text-teal-700">
+          {tipoEntrega === "ENTREGADO_TOTAL" ? "Entrega Total" : "Entrega Parcial"} — Venta #{venta.id_venta}
+        </h2>
+        <p className="mt-1 text-sm text-honda-muted">{venta.cliente_razon_social}</p>
+
+        <div className="mt-4 overflow-x-auto border border-honda-line">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-[#f6f6f6] text-left">
+                <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Código</th>
+                <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Descripción</th>
+                <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Pedido</th>
+                <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Ya Entregado</th>
+                <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">A Entregar</th>
+              </tr>
+            </thead>
+            <tbody>
+              {itemsPendientes.map((item) => {
+                const restante = item.cantidad - item.cantidad_entregada;
+                return (
+                  <tr key={item.id_detalle_venta} className="border-b border-honda-line">
+                    <td className="px-3 py-2 text-xs">{item.codigo_producto}</td>
+                    <td className="px-3 py-2 text-xs">{item.descripcion_item}</td>
+                    <td className="px-3 py-2 text-center text-xs">{item.cantidad}</td>
+                    <td className="px-3 py-2 text-center text-xs">{item.cantidad_entregada}</td>
+                    <td className="px-3 py-2 text-center">
+                      <input
+                        type="number"
+                        min={0}
+                        max={restante}
+                        value={cantidades[item.id_detalle_venta] ?? 0}
+                        onChange={(e) => {
+                          const val = Math.min(Math.max(0, parseInt(e.target.value) || 0), restante);
+                          setCantidades((prev) => ({ ...prev, [item.id_detalle_venta]: val }));
+                        }}
+                        className="h-8 w-16 border border-honda-line px-2 text-center text-xs outline-none focus:border-teal-500"
+                      />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="mt-6 flex gap-3">
+          <button type="submit" className="h-10 bg-teal-600 px-6 text-sm font-semibold uppercase tracking-wide text-white hover:bg-teal-700">
+            Confirmar Entrega
+          </button>
+          <button type="button" onClick={onClose} className="h-10 border border-honda-line px-6 text-sm font-semibold uppercase tracking-wide hover:bg-[#f6f6f6]">
+            Cancelar
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+
+/* ------------------------------------------------------------------ */
+/*  Anular Items Modal                                                 */
+/* ------------------------------------------------------------------ */
+
+function AnularItemsModal({
+  venta,
+  onConfirm,
+  onClose,
+}: {
+  venta: Venta;
+  onConfirm: (itemIds: number[]) => void;
+  onClose: () => void;
+}) {
+  const itemsAnulables = venta.items.filter((i) => i.estado_item !== "ANULADO");
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<number>>(new Set());
+
+  function toggle(id: number) {
+    setSelectedItemIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-12 pb-12" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-2xl bg-white p-6 shadow-xl sm:p-8">
+        <h2 className="font-display text-xl font-bold uppercase tracking-wide text-red-700">
+          Anular Ítems — Venta #{venta.id_venta}
+        </h2>
+        <p className="mt-1 text-sm text-honda-muted">Seleccioná los ítems que querés anular.</p>
+
+        <div className="mt-4 overflow-x-auto border border-honda-line">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-[#f6f6f6] text-left">
+                <th className="border-b border-honda-line px-2 py-2 text-center">
+                  <input
+                    type="checkbox"
+                    checked={itemsAnulables.length > 0 && itemsAnulables.every((i) => selectedItemIds.has(i.id_detalle_venta))}
+                    onChange={() => {
+                      const allSelected = itemsAnulables.every((i) => selectedItemIds.has(i.id_detalle_venta));
+                      setSelectedItemIds(allSelected ? new Set() : new Set(itemsAnulables.map((i) => i.id_detalle_venta)));
+                    }}
+                    className="h-4 w-4 accent-red-600"
+                  />
+                </th>
+                <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Código</th>
+                <th className="border-b border-honda-line px-3 py-2 text-xs font-semibold uppercase">Descripción</th>
+                <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Cant.</th>
+                <th className="border-b border-honda-line px-3 py-2 text-center text-xs font-semibold uppercase">Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {itemsAnulables.map((item) => (
+                <tr key={item.id_detalle_venta} className="border-b border-honda-line">
+                  <td className="px-2 py-2 text-center">
+                    <input type="checkbox" checked={selectedItemIds.has(item.id_detalle_venta)} onChange={() => toggle(item.id_detalle_venta)} className="h-4 w-4 accent-red-600" />
+                  </td>
+                  <td className="px-3 py-2 text-xs">{item.codigo_producto}</td>
+                  <td className="px-3 py-2 text-xs">{item.descripcion_item}</td>
+                  <td className="px-3 py-2 text-center text-xs">{item.cantidad}</td>
+                  <td className="px-3 py-2 text-center">
+                    <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-medium ${
+                      item.estado_item === "ENTREGADO" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"
+                    }`}>{item.estado_item}</span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {selectedItemIds.size > 0 && selectedItemIds.size === itemsAnulables.length && (
+          <div className="mt-3 rounded bg-amber-50 px-4 py-2 text-sm text-amber-800">
+            ⚠ Anular todos los ítems cambiará la venta entera a estado <strong>ANULADO</strong>.
+          </div>
+        )}
+
+        <div className="mt-6 flex gap-3">
+          <button
+            type="button"
+            disabled={selectedItemIds.size === 0}
+            onClick={() => onConfirm(Array.from(selectedItemIds))}
+            className="h-10 bg-red-700 px-6 text-sm font-semibold uppercase tracking-wide text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            Anular ({selectedItemIds.size}) Ítem(s)
+          </button>
+          <button type="button" onClick={onClose} className="h-10 border border-honda-line px-6 text-sm font-semibold uppercase tracking-wide hover:bg-[#f6f6f6]">
+            Cancelar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

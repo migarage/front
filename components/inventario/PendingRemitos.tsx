@@ -122,7 +122,7 @@ export function PendingRemitosList({
   const pendientes = MOCK_PENDIENTES;
 
   return (
-    <div className="fixed inset-0 z-[80] flex justify-end bg-black/40">
+    <div className="fixed inset-0 z-[80] flex justify-end bg-black/40" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="flex h-full w-full max-w-lg flex-col bg-white shadow-xl">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-honda-line px-6 py-4">
@@ -217,7 +217,7 @@ export function ProcessRemitoModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-10 pb-8">
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-10 pb-8" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form
         onSubmit={handleSubmit}
         className="relative w-full max-w-4xl bg-white shadow-xl"

@@ -34,7 +34,7 @@ CREATE TABLE marcas (
     nombre_marca VARCHAR(100) NOT NULL UNIQUE
 );
 
--- TABLA NUEVA: cotizaciones_dolar
+-- TABLA: cotizaciones_dolar
 -- Se alimenta una vez al día desde una API externa configurada en el backend.
 -- Los tipos de dólar disponibles se derivan de los DISTINCT tipo_dolar de esta tabla.
 CREATE TABLE cotizaciones_dolar (
@@ -52,8 +52,8 @@ CREATE TABLE productos (
     codigo_reemplazo VARCHAR(255),
     aplicacion TEXT,
     precio_usd_lista DECIMAL(12, 4),
-    tipo_dolar VARCHAR(50),                           -- NUEVO: tipo de dólar usado en la conversión
-    tipo_cambio_conversion DECIMAL(10, 2),            -- NUEVO: cotización usada al momento de cargar
+    tipo_dolar VARCHAR(50),
+    tipo_cambio_conversion DECIMAL(10, 2),
     id_proveedor_habitual INT,
     id_marca INT,
     activo BOOLEAN NOT NULL DEFAULT TRUE,
@@ -70,14 +70,14 @@ CREATE TABLE inventario (
     FOREIGN KEY (codigo_producto) REFERENCES productos(codigo_producto)
 );
 
--- TABLA NUEVA: historico_precios
+-- TABLA: historico_precios
 -- Registra cada cambio de precio para poder mostrar historial y calcular promedios.
 -- fecha_hasta = NULL indica que es el precio vigente actual.
 CREATE TABLE historico_precios (
     id_historico INT AUTO_INCREMENT PRIMARY KEY,
     codigo_producto VARCHAR(50) NOT NULL,
     precio_usd_lista DECIMAL(12, 4) NOT NULL,
-    tipo_dolar VARCHAR(50),                            -- NUEVO: tipo de dólar usado
+    tipo_dolar VARCHAR(50),
     tipo_cambio_momento DECIMAL(10, 2),
     precio_ars_momento DECIMAL(12, 4),
     fecha_desde DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -91,16 +91,24 @@ CREATE TABLE historico_precios (
 -- 2. CIRCUITO DE COMPRAS A PROVEEDORES
 -- ============================================================================
 
+-- Estados válidos: PARA_PEDIR, PENDIENTE_ENTREGA, RECIBIDO, CANCELADO
+-- Transiciones:
+--   PARA_PEDIR → PENDIENTE_ENTREGA | CANCELADO
+--   PENDIENTE_ENTREGA → RECIBIDO | CANCELADO
+--   RECIBIDO, CANCELADO → (estados finales)
+
 CREATE TABLE solicitudes_compra (
     id_solicitud_compra INT AUTO_INCREMENT PRIMARY KEY,
     numero_solicitud VARCHAR(50),
     id_proveedor INT NOT NULL,
     id_cliente_destino INT,
     fecha_solicitud DATE NOT NULL,
-    estado_solicitud VARCHAR(50) DEFAULT 'PENDIENTE',
+    estado_solicitud VARCHAR(50) DEFAULT 'PARA_PEDIR',
     tipo_cambio DECIMAL(10, 2),
-    tipo_dolar VARCHAR(50),                            -- NUEVO: tipo de dólar usado
+    tipo_dolar VARCHAR(50),
     factor_costos DECIMAL(6, 4) DEFAULT 1.3200,
+    monto_total_usd DECIMAL(12, 4) DEFAULT 0,
+    monto_total_ars DECIMAL(12, 4) DEFAULT 0,
     observaciones TEXT,
     FOREIGN KEY (id_proveedor) REFERENCES proveedores(id_proveedor),
     FOREIGN KEY (id_cliente_destino) REFERENCES clientes(id_cliente)
@@ -112,38 +120,49 @@ CREATE TABLE detalle_solicitud_compra (
     codigo_producto VARCHAR(50) NOT NULL,
     cantidad_solicitada INT NOT NULL DEFAULT 1,
     precio_usd_estimado DECIMAL(12, 4),
-    tipo_dolar VARCHAR(50),                            -- NUEVO
-    tipo_cambio_conversion DECIMAL(10, 2),             -- NUEVO
+    precio_ars_estimado DECIMAL(12, 4),
+    tipo_dolar VARCHAR(50),
+    tipo_cambio_conversion DECIMAL(10, 2),
     FOREIGN KEY (id_solicitud_compra) REFERENCES solicitudes_compra(id_solicitud_compra),
     FOREIGN KEY (codigo_producto) REFERENCES productos(codigo_producto)
 );
 
+-- Remitos de compra: cabecera SIN FK a solicitud (relación many-to-many vía detalle)
+-- Un remito puede cubrir ítems de múltiples órdenes de compra.
+-- Una orden de compra puede recibirse en múltiples remitos.
 CREATE TABLE remitos_compra (
     id_remito INT AUTO_INCREMENT PRIMARY KEY,
-    id_solicitud_compra INT NOT NULL,
     codigo_remito VARCHAR(100) NOT NULL UNIQUE,
+    id_proveedor INT NOT NULL,
     fecha_remito DATE NOT NULL,
     observaciones TEXT,
-    FOREIGN KEY (id_solicitud_compra) REFERENCES solicitudes_compra(id_solicitud_compra)
+    FOREIGN KEY (id_proveedor) REFERENCES proveedores(id_proveedor)
 );
 
+-- Detalle de remito: cada línea vincula a la orden de compra de origen
 CREATE TABLE detalle_remito_compra (
     id_detalle_remito INT AUTO_INCREMENT PRIMARY KEY,
     id_remito INT NOT NULL,
+    id_solicitud_compra INT,
+    id_detalle_solicitud INT,
     codigo_producto VARCHAR(50),
     descripcion VARCHAR(255) NOT NULL,
     cantidad INT NOT NULL DEFAULT 1,
-    procesado_inventario BOOLEAN NOT NULL DEFAULT FALSE,  -- COLUMNA NUEVA: staging → inventario
+    cantidad_aceptada INT,                                 -- NULL = aún no verificado. Para comparar físico vs remito.
+    procesado_inventario BOOLEAN NOT NULL DEFAULT FALSE,
     FOREIGN KEY (id_remito) REFERENCES remitos_compra(id_remito),
+    FOREIGN KEY (id_solicitud_compra) REFERENCES solicitudes_compra(id_solicitud_compra),
+    FOREIGN KEY (id_detalle_solicitud) REFERENCES detalle_solicitud_compra(id_detalle_solicitud),
     FOREIGN KEY (codigo_producto) REFERENCES productos(codigo_producto)
 );
 
+-- Facturas de compra: cabecera SIN FK a solicitud (relación many-to-many vía detalle)
 CREATE TABLE facturas_compra (
     id_factura_compra INT AUTO_INCREMENT PRIMARY KEY,
-    id_solicitud_compra INT NOT NULL,
     tipo_comprobante VARCHAR(20) NOT NULL CHECK (tipo_comprobante IN ('FACTURA', 'NOTA_CREDITO', 'NOTA_DEBITO')),
     codigo_factura_arca VARCHAR(100),
     codigo_factura_sap VARCHAR(100),
+    id_proveedor INT NOT NULL,
     fecha_emision DATE NOT NULL,
     tipo_letra CHAR(1) CHECK (tipo_letra IN ('A', 'B', 'C', 'M')),
     monto_subtotal DECIMAL(12, 4) NOT NULL,
@@ -151,21 +170,54 @@ CREATE TABLE facturas_compra (
     monto_total DECIMAL(12, 4) NOT NULL,
     id_factura_referencia INT,
     estado_pago VARCHAR(50) DEFAULT 'PENDIENTE',
-    FOREIGN KEY (id_solicitud_compra) REFERENCES solicitudes_compra(id_solicitud_compra),
+    FOREIGN KEY (id_proveedor) REFERENCES proveedores(id_proveedor),
     FOREIGN KEY (id_factura_referencia) REFERENCES facturas_compra(id_factura_compra)
 );
 
+-- Detalle de factura de compra: cada línea vincula a la orden de compra de origen
 CREATE TABLE detalle_factura_compra (
     id_detalle_factura_compra INT AUTO_INCREMENT PRIMARY KEY,
     id_factura_compra INT NOT NULL,
+    id_solicitud_compra INT,
+    id_detalle_solicitud INT,
     codigo_producto VARCHAR(50),
     descripcion VARCHAR(255) NOT NULL,
     cantidad INT NOT NULL DEFAULT 1,
     precio_unitario DECIMAL(12, 4) NOT NULL,
     monto_subtotal DECIMAL(12, 4) NOT NULL,
-    tipo_dolar VARCHAR(50),                            -- NUEVO
-    tipo_cambio_conversion DECIMAL(10, 2),             -- NUEVO
+    tipo_dolar VARCHAR(50),
+    tipo_cambio_conversion DECIMAL(10, 2),
     FOREIGN KEY (id_factura_compra) REFERENCES facturas_compra(id_factura_compra),
+    FOREIGN KEY (id_solicitud_compra) REFERENCES solicitudes_compra(id_solicitud_compra),
+    FOREIGN KEY (id_detalle_solicitud) REFERENCES detalle_solicitud_compra(id_detalle_solicitud),
+    FOREIGN KEY (codigo_producto) REFERENCES productos(codigo_producto)
+);
+
+-- Devoluciones a proveedor por falla
+CREATE TABLE devoluciones_compra (
+    id_devolucion_compra INT AUTO_INCREMENT PRIMARY KEY,
+    numero_devolucion VARCHAR(50) NOT NULL UNIQUE,
+    id_proveedor INT NOT NULL,
+    fecha_devolucion DATETIME DEFAULT CURRENT_TIMESTAMP,
+    motivo VARCHAR(255),
+    monto_total_devolucion DECIMAL(12, 4) NOT NULL DEFAULT 0,
+    id_factura_nota_credito INT,
+    observaciones TEXT,
+    FOREIGN KEY (id_proveedor) REFERENCES proveedores(id_proveedor),
+    FOREIGN KEY (id_factura_nota_credito) REFERENCES facturas_compra(id_factura_compra)
+);
+
+CREATE TABLE detalle_devolucion_compra (
+    id_detalle_devolucion_compra INT AUTO_INCREMENT PRIMARY KEY,
+    id_devolucion_compra INT NOT NULL,
+    id_detalle_remito INT,
+    codigo_producto VARCHAR(50) NOT NULL,
+    cantidad_devuelta INT NOT NULL DEFAULT 1,
+    motivo_falla VARCHAR(255),
+    precio_unitario DECIMAL(12, 4) NOT NULL,
+    monto_subtotal DECIMAL(12, 4) NOT NULL,
+    FOREIGN KEY (id_devolucion_compra) REFERENCES devoluciones_compra(id_devolucion_compra),
+    FOREIGN KEY (id_detalle_remito) REFERENCES detalle_remito_compra(id_detalle_remito),
     FOREIGN KEY (codigo_producto) REFERENCES productos(codigo_producto)
 );
 
@@ -173,6 +225,29 @@ CREATE TABLE detalle_factura_compra (
 -- ============================================================================
 -- 3. CIRCUITO DE VENTAS Y LOGÍSTICA
 -- ============================================================================
+
+-- Estados válidos (10): PRESUPUESTO, NOTA_DE_PEDIDO, PENDIENTE_RECIBO_MERCADERIA,
+--   PENDIENTE_ENTREGA_CLIENTE, ENTREGADO_PARCIAL, ENTREGADO_TOTAL,
+--   COMPLETADO, ANULADO, DEVOLUCION, DEVOLUCION_PARCIAL
+-- Transiciones:
+--   PRESUPUESTO → NOTA_DE_PEDIDO | ANULADO
+--   NOTA_DE_PEDIDO → PENDIENTE_RECIBO_MERCADERIA | PENDIENTE_ENTREGA_CLIENTE | ANULADO
+--   PENDIENTE_RECIBO_MERCADERIA → PENDIENTE_ENTREGA_CLIENTE | ANULADO
+--   PENDIENTE_ENTREGA_CLIENTE → ENTREGADO_PARCIAL | ENTREGADO_TOTAL | ANULADO
+--   ENTREGADO_PARCIAL → ENTREGADO_TOTAL | COMPLETADO | ANULADO
+--   ENTREGADO_TOTAL → COMPLETADO
+--   COMPLETADO → DEVOLUCION | DEVOLUCION_PARCIAL
+--   ANULADO, DEVOLUCION, DEVOLUCION_PARCIAL → (estados finales)
+--
+-- Facturación:
+--   Solo habilitada en ENTREGADO_PARCIAL o ENTREGADO_TOTAL.
+--   Se facturan ítems entregados (estado_item = ENTREGADO) con cantidad_entregada > cantidad_facturada.
+--   Cuando todos los ítems no-anulados están 100% facturados → COMPLETADO automático.
+--   Ventas sin factura pueden pasar a COMPLETADO manualmente.
+--
+-- Anulación parcial de ítems:
+--   Disponible en cualquier estado pre-COMPLETADO.
+--   Si se anulan todos los ítems → la venta entera pasa a ANULADO.
 
 CREATE TABLE ventas (
     id_venta INT AUTO_INCREMENT PRIMARY KEY,
@@ -183,23 +258,10 @@ CREATE TABLE ventas (
     monto_total_venta DECIMAL(12, 4) NOT NULL DEFAULT 0,
     forma_pago VARCHAR(50),
     estado_venta VARCHAR(50) DEFAULT 'PRESUPUESTO',
-    -- Estados válidos: PRESUPUESTO, NOTA_DE_PEDIDO, PENDIENTE_RECIBO_MERCADERIA,
-    --                  PENDIENTE_ENTREGA_CLIENTE, COMPLETADO, ANULADO, DEVOLUCION, DEVOLUCION_PARCIAL
-    -- Transiciones:
-    --   PRESUPUESTO → NOTA_DE_PEDIDO | ANULADO
-    --   NOTA_DE_PEDIDO → PENDIENTE_RECIBO_MERCADERIA | PENDIENTE_ENTREGA_CLIENTE | ANULADO
-    --   PENDIENTE_RECIBO_MERCADERIA → PENDIENTE_ENTREGA_CLIENTE | ANULADO
-    --   PENDIENTE_ENTREGA_CLIENTE → COMPLETADO | ANULADO
-    --   COMPLETADO → DEVOLUCION | DEVOLUCION_PARCIAL
-    --   ANULADO, DEVOLUCION, DEVOLUCION_PARCIAL → (estados finales)
     precios_congelados BOOLEAN NOT NULL DEFAULT FALSE,
-    -- TRUE cuando se crea como presupuesto (precios fijos), FALSE cuando se crea directo como nota de pedido (precios se definen al completar)
-    monto_abonado DECIMAL(12, 4) NOT NULL DEFAULT 0,       -- NUEVO: total pagado hasta ahora (pagos parciales)
-    -- saldo = monto_total_venta - monto_abonado (calculado, no se almacena)
-    descuento_general_porcentaje DECIMAL(5, 2) DEFAULT 0,   -- NUEVO: descuento general % sobre subtotal (se suma a descuentos individuales)
-    descuento_general_monto DECIMAL(12, 4) DEFAULT 0,       -- NUEVO: descuento general en ARS (alternativa al %)
-    -- El usuario ingresa % o ARS; el otro se calcula. Se aplica sobre subtotal después de descuentos individuales.
-    facturada BOOLEAN NOT NULL DEFAULT FALSE,               -- NUEVO: TRUE si se generó factura al completar
+    monto_abonado DECIMAL(12, 4) NOT NULL DEFAULT 0,
+    descuento_general_porcentaje DECIMAL(5, 2) DEFAULT 0,
+    descuento_general_monto DECIMAL(12, 4) DEFAULT 0,
     observaciones TEXT,
     FOREIGN KEY (id_cliente) REFERENCES clientes(id_cliente)
 );
@@ -211,47 +273,54 @@ CREATE TABLE detalle_venta (
     descripcion_item VARCHAR(255) NOT NULL,
     cantidad INT NOT NULL DEFAULT 1,
     precio_unitario_sin_iva DECIMAL(12, 4) NOT NULL,
-    descuento_porcentaje DECIMAL(5, 2) DEFAULT 0,          -- NUEVO: % de descuento sobre precio unitario
-    descuento_monto DECIMAL(12, 4) DEFAULT 0,              -- NUEVO: monto fijo de descuento por unidad
-    -- precio_final = precio_unitario_sin_iva - descuento_monto (o bien precio * (1 - descuento_porcentaje/100))
-    -- margen = precio_final - costo_producto (calculado, no se almacena)
+    descuento_porcentaje DECIMAL(5, 2) DEFAULT 0,
+    descuento_monto DECIMAL(12, 4) DEFAULT 0,
     monto_iva DECIMAL(12, 4) NOT NULL,
     monto_total_linea DECIMAL(12, 4) NOT NULL,
     tipo_dolar VARCHAR(50),
     tipo_cambio_conversion DECIMAL(10, 2),
+    -- Tracking de entregas y facturación por ítem
+    estado_item VARCHAR(20) DEFAULT 'PENDIENTE',           -- PENDIENTE | ENTREGADO | ANULADO
+    cantidad_entregada INT NOT NULL DEFAULT 0,             -- cuántas unidades se entregaron
+    cantidad_facturada INT NOT NULL DEFAULT 0,             -- cuántas unidades se facturaron
     FOREIGN KEY (id_venta) REFERENCES ventas(id_venta),
     FOREIGN KEY (codigo_producto) REFERENCES productos(codigo_producto)
 );
 
+-- Remitos de venta: cabecera SIN FK a venta (relación many-to-many vía detalle)
+-- Un remito puede despachar ítems de múltiples ventas.
+-- Una venta puede despacharse en múltiples remitos.
 CREATE TABLE remitos_venta (
     id_remito_venta INT AUTO_INCREMENT PRIMARY KEY,
-    id_venta INT NOT NULL,
     numero_remito VARCHAR(100) NOT NULL UNIQUE,
     fecha_despacho DATE NOT NULL,
     estado_entrega VARCHAR(50) DEFAULT 'DESPACHADO',
-    observaciones TEXT,
-    FOREIGN KEY (id_venta) REFERENCES ventas(id_venta)
+    observaciones TEXT
 );
 
+-- Detalle de remito de venta: cada línea vincula a la venta de origen
 CREATE TABLE detalle_remito_venta (
     id_detalle_remito_venta INT AUTO_INCREMENT PRIMARY KEY,
     id_remito_venta INT NOT NULL,
+    id_venta INT NOT NULL,
     id_detalle_venta INT,
     codigo_producto VARCHAR(50),
     descripcion VARCHAR(255) NOT NULL,
     cantidad_despachada INT NOT NULL DEFAULT 1,
     FOREIGN KEY (id_remito_venta) REFERENCES remitos_venta(id_remito_venta),
+    FOREIGN KEY (id_venta) REFERENCES ventas(id_venta),
     FOREIGN KEY (id_detalle_venta) REFERENCES detalle_venta(id_detalle_venta),
     FOREIGN KEY (codigo_producto) REFERENCES productos(codigo_producto)
 );
 
+-- Facturas de venta: cabecera SIN FK a venta (relación many-to-many vía detalle)
 CREATE TABLE facturas_venta (
     id_factura_venta INT AUTO_INCREMENT PRIMARY KEY,
-    id_venta INT NOT NULL,
     tipo_comprobante VARCHAR(20) NOT NULL CHECK (tipo_comprobante IN ('FACTURA', 'NOTA_CREDITO', 'NOTA_DEBITO')),
     numero_comprobante VARCHAR(50) NOT NULL,
     fecha_emision DATE NOT NULL,
     tipo_letra CHAR(1) CHECK (tipo_letra IN ('A', 'B', 'C')),
+    id_cliente INT NOT NULL,
     monto_subtotal DECIMAL(12, 4) NOT NULL,
     monto_iva DECIMAL(12, 4) NOT NULL,
     monto_total_factura DECIMAL(12, 4) NOT NULL,
@@ -260,13 +329,15 @@ CREATE TABLE facturas_venta (
     id_factura_referencia INT,
     estado_cobro VARCHAR(50) DEFAULT 'PENDIENTE',
     observaciones TEXT,
-    FOREIGN KEY (id_venta) REFERENCES ventas(id_venta),
+    FOREIGN KEY (id_cliente) REFERENCES clientes(id_cliente),
     FOREIGN KEY (id_factura_referencia) REFERENCES facturas_venta(id_factura_venta)
 );
 
+-- Detalle de factura de venta: cada línea vincula a la venta de origen
 CREATE TABLE detalle_factura_venta (
     id_detalle_factura_venta INT AUTO_INCREMENT PRIMARY KEY,
     id_factura_venta INT NOT NULL,
+    id_venta INT NOT NULL,
     id_detalle_venta INT,
     descripcion_item VARCHAR(255) NOT NULL,
     cantidad INT NOT NULL DEFAULT 1,
@@ -274,6 +345,7 @@ CREATE TABLE detalle_factura_venta (
     monto_iva DECIMAL(12, 4) NOT NULL,
     monto_total_linea DECIMAL(12, 4) NOT NULL,
     FOREIGN KEY (id_factura_venta) REFERENCES facturas_venta(id_factura_venta),
+    FOREIGN KEY (id_venta) REFERENCES ventas(id_venta),
     FOREIGN KEY (id_detalle_venta) REFERENCES detalle_venta(id_detalle_venta)
 );
 
@@ -282,18 +354,14 @@ CREATE TABLE detalle_factura_venta (
 -- 3.5 VÍNCULO VENTA ↔ SOLICITUD DE COMPRA (Pendiente de Recibo Mercadería)
 -- ============================================================================
 
--- Cuando una venta pasa a PENDIENTE_RECIBO_MERCADERIA, se registra qué ítems
--- faltan y opcionalmente se vincula a una solicitud de compra existente.
--- Si no se vincula a una solicitud, pendiente_asignacion = TRUE indica que queda
--- en una cola de pendientes hasta que se cree la solicitud desde la pantalla Compras.
 CREATE TABLE venta_solicitud_compra (
     id_venta_solicitud INT AUTO_INCREMENT PRIMARY KEY,
     id_venta INT NOT NULL,
     id_detalle_venta INT NOT NULL,
     codigo_producto VARCHAR(50) NOT NULL,
     cantidad_pendiente INT NOT NULL DEFAULT 1,
-    id_solicitud_compra INT,                             -- NULL si aún no se asignó
-    pendiente_asignacion BOOLEAN NOT NULL DEFAULT TRUE,   -- TRUE = en cola de pendientes
+    id_solicitud_compra INT,
+    pendiente_asignacion BOOLEAN NOT NULL DEFAULT TRUE,
     fecha_registro DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (id_venta) REFERENCES ventas(id_venta),
     FOREIGN KEY (id_detalle_venta) REFERENCES detalle_venta(id_detalle_venta),
@@ -303,7 +371,7 @@ CREATE TABLE venta_solicitud_compra (
 
 
 -- ============================================================================
--- 4. CIRCUITO DE DEVOLUCIONES
+-- 4. CIRCUITO DE DEVOLUCIONES (VENTAS)
 -- ============================================================================
 
 CREATE TABLE devoluciones (

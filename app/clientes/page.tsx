@@ -3,13 +3,13 @@
 import { CrudSection, type Column, type FormField } from "@/components/crud/CrudSection";
 
 const COLUMNS: Column[] = [
-  { key: "id_cliente", label: "ID" },
-  { key: "codigo_alias", label: "Alias" },
-  { key: "razon_social", label: "Razón Social" },
-  { key: "cuit", label: "CUIT" },
-  { key: "tipo_factura_habitual", label: "FC" },
-  { key: "direccion", label: "Dirección" },
-  { key: "saldo_actual", label: "Saldo CC", format: "money" },
+  { key: "id_cliente", label: "ID", filter: "text" },
+  { key: "codigo_alias", label: "Alias", filter: "text" },
+  { key: "razon_social", label: "Razón Social", filter: "text" },
+  { key: "cuit", label: "CUIT", filter: "text" },
+  { key: "tipo_factura_habitual", label: "FC", filter: "select", filterOptions: ["A", "B", "C"] },
+  { key: "direccion", label: "Dirección", filter: "text" },
+  { key: "saldo_actual", label: "Saldo CC", format: "money", filter: "money_range" },
 ];
 
 const CREATE_FIELDS: FormField[] = [

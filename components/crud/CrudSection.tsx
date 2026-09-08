@@ -13,6 +13,8 @@ export type Column = {
   label: string;
   format?: "money" | "usd" | "date" | "badge";
   badgeColors?: Record<string, string>;
+  filter?: "text" | "select" | "money_range";
+  filterOptions?: string[];
 };
 
 export type FormField = {
@@ -74,16 +76,52 @@ export function CrudSection({
   const [page, setPage] = useState(1);
   const [modal, setModal] = useState<ModalState>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
+
+  const hasColumnFilters = columns.some((c) => c.filter);
 
   const keys = searchKeys ?? columns.map((c) => c.key);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return records;
-    const q = search.toLowerCase();
-    return records.filter((r) =>
-      keys.some((k) => String(r[k] ?? "").toLowerCase().includes(q)),
-    );
-  }, [records, search, keys]);
+    let result = records;
+
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter((r) =>
+        keys.some((k) => String(r[k] ?? "").toLowerCase().includes(q)),
+      );
+    }
+
+    for (const col of columns) {
+      if (!col.filter) continue;
+      const fv = columnFilters[col.key];
+      if (!fv || !fv.trim()) continue;
+
+      if (col.filter === "select") {
+        result = result.filter((r) => String(r[col.key] ?? "") === fv);
+      } else if (col.filter === "money_range") {
+        const num = parseFloat(fv);
+        if (!isNaN(num)) {
+          if (fv.startsWith(">")) {
+            const val = parseFloat(fv.slice(1));
+            if (!isNaN(val)) result = result.filter((r) => Number(r[col.key] ?? 0) > val);
+          } else if (fv.startsWith("<")) {
+            const val = parseFloat(fv.slice(1));
+            if (!isNaN(val)) result = result.filter((r) => Number(r[col.key] ?? 0) < val);
+          } else {
+            result = result.filter((r) => Number(r[col.key] ?? 0) === num);
+          }
+        }
+      } else {
+        const q = fv.toLowerCase();
+        result = result.filter((r) =>
+          String(r[col.key] ?? "").toLowerCase().includes(q),
+        );
+      }
+    }
+
+    return result;
+  }, [records, search, keys, columns, columnFilters]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -169,6 +207,63 @@ export function CrudSection({
                   Acciones
                 </th>
               </tr>
+              {hasColumnFilters && (
+                <tr className="bg-[#fafafa]">
+                  {columns.map((col) => (
+                    <th key={col.key} className="border-b border-honda-line px-3 py-2">
+                      {col.filter === "select" ? (
+                        <select
+                          value={columnFilters[col.key] ?? ""}
+                          onChange={(e) => {
+                            setColumnFilters((p) => ({ ...p, [col.key]: e.target.value }));
+                            setPage(1);
+                          }}
+                          className="h-8 w-full border border-honda-line bg-white px-2 text-xs outline-none focus:border-[#CC0000]"
+                        >
+                          <option value="">Todos</option>
+                          {col.filterOptions?.map((opt) => (
+                            <option key={opt} value={opt}>{opt}</option>
+                          ))}
+                        </select>
+                      ) : col.filter === "text" ? (
+                        <input
+                          value={columnFilters[col.key] ?? ""}
+                          onChange={(e) => {
+                            setColumnFilters((p) => ({ ...p, [col.key]: e.target.value }));
+                            setPage(1);
+                          }}
+                          placeholder="Filtrar..."
+                          className="h-8 w-full border border-honda-line px-2 text-xs outline-none focus:border-[#CC0000]"
+                        />
+                      ) : col.filter === "money_range" ? (
+                        <input
+                          value={columnFilters[col.key] ?? ""}
+                          onChange={(e) => {
+                            setColumnFilters((p) => ({ ...p, [col.key]: e.target.value }));
+                            setPage(1);
+                          }}
+                          placeholder=">0, <1000..."
+                          title="Ej: >0 (saldo positivo), <1000, o un valor exacto"
+                          className="h-8 w-full border border-honda-line px-2 text-xs outline-none focus:border-[#CC0000]"
+                        />
+                      ) : (
+                        <span />
+                      )}
+                    </th>
+                  ))}
+                  <th className="border-b border-honda-line px-3 py-2">
+                    {Object.values(columnFilters).some((v) => v && v.trim()) && (
+                      <button
+                        type="button"
+                        onClick={() => { setColumnFilters({}); setPage(1); }}
+                        className="text-[10px] font-medium text-[#CC0000] hover:underline"
+                      >
+                        Limpiar
+                      </button>
+                    )}
+                  </th>
+                </tr>
+              )}
             </thead>
             <tbody>
               {paginated.length === 0 ? (
@@ -326,7 +421,7 @@ function FormModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-16 pb-8">
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-16 pb-8" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form
         className="relative w-full max-w-2xl bg-white p-6 shadow-xl sm:p-8"
         onSubmit={(e) => {
@@ -493,7 +588,7 @@ function DeleteModal({
   onClose: () => void;
 }) {
   return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center bg-black/40 pt-24">
+    <div className="fixed inset-0 z-[90] flex items-start justify-center bg-black/40 pt-24" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="w-full max-w-md bg-white p-6 shadow-xl sm:p-8">
         <h2 className="font-display text-xl font-bold uppercase tracking-wide text-red-700">
           Confirmar baja
