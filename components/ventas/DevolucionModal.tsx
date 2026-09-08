@@ -70,7 +70,7 @@ export function DevolucionModal({
   }
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-10 pb-8">
+    <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-10 pb-8" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <form
         onSubmit={handleSubmit}
         className="relative w-full max-w-3xl bg-white shadow-xl"
