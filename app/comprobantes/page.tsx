@@ -1,6 +1,7 @@
 "use client";
 
 import { CrudSection, type Column, type FormField } from "@/components/crud/CrudSection";
+import { usePendingRemitos } from "@/contexts/PendingRemitosContext";
 
 const COLUMNS: Column[] = [
   { key: "numero_comprobante", label: "Número" },
@@ -25,7 +26,7 @@ const CREATE_FIELDS: FormField[] = [
   { name: "numero_comprobante", label: "Número", type: "text", required: true, placeholder: "0001-00004512" },
   { name: "fecha_emision", label: "Fecha Emisión", type: "date", required: true },
   { name: "entidad_nombre", label: "Entidad", type: "select", options: ["Repuestos El Sol S.R.L.", "AutoCenter S.A.", "Distribuidora Norte", "Taller Méndez", "Bosch Argentina", "Mann Filter"] },
-  { name: "monto_total", label: "Monto Total", type: "number", required: true, step: "0.01" },
+  { name: "monto_total", label: "Monto Total", type: "price", required: true },
   { name: "cae", label: "CAE", type: "text", placeholder: "74359281039485" },
   { name: "fecha_vencimiento_cae", label: "Vto. CAE", type: "date" },
 ];
@@ -47,6 +48,14 @@ const MOCK = [
 ];
 
 export default function ComprobantesPage() {
+  const { increment } = usePendingRemitos();
+
+  function handleCreateSuccess(data: Record<string, unknown>) {
+    if (data.tipo_operacion === "COMPRA" && data.tipo_comprobante === "REMITO") {
+      increment();
+    }
+  }
+
   return (
     <CrudSection
       title="Remitos y Facturas"
@@ -58,6 +67,7 @@ export default function ComprobantesPage() {
       idKey="id_comprobante"
       displayKey="numero_comprobante"
       searchPlaceholder="Buscar por número, entidad..."
+      onCreateSuccess={handleCreateSuccess}
     />
   );
 }
