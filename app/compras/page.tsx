@@ -23,9 +23,8 @@ const CREATE_FIELDS: FormField[] = [
   { name: "proveedor_nombre", label: "Proveedor", type: "select", required: true, options: ["Bosch Argentina", "Mann Filter", "NGK", "Mahle", "Fram"] },
   { name: "cliente_destino", label: "Cliente Destino", type: "select", options: ["Stock General", "Repuestos El Sol S.R.L.", "AutoCenter S.A.", "Distribuidora Norte"] },
   { name: "fecha_solicitud", label: "Fecha Solicitud", type: "date", required: true },
-  { name: "tipo_cambio", label: "Tipo de Cambio", type: "number", required: true, step: "0.01", placeholder: "1400.00" },
+  { name: "monto_total", label: "Monto Total Estimado", type: "price", required: true },
   { name: "factor_costos", label: "Factor Costos", type: "number", required: true, step: "0.01", placeholder: "1.12" },
-  { name: "monto_total_usd", label: "Monto Total USD", type: "number", required: true, step: "0.01" },
   { name: "observaciones", label: "Observaciones", type: "textarea", span: 2 },
 ];
 

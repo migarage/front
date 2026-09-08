@@ -2,6 +2,7 @@
 
 import { useState, useMemo, type ReactNode } from "react";
 import { formatARS, formatUSD, fmtDate } from "@/lib/format";
+import { useCotizaciones } from "@/contexts/CotizacionesContext";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -17,7 +18,7 @@ export type Column = {
 export type FormField = {
   name: string;
   label: string;
-  type: "text" | "number" | "select" | "textarea" | "date";
+  type: "text" | "number" | "select" | "textarea" | "date" | "price";
   required?: boolean;
   placeholder?: string;
   options?: string[];
@@ -44,6 +45,8 @@ type Props = {
   displayKey: string;
   searchPlaceholder?: string;
   searchKeys?: string[];
+  headerExtra?: ReactNode;
+  onCreateSuccess?: (data: Row) => void;
 };
 
 const PAGE_SIZE = 8;
@@ -63,6 +66,8 @@ export function CrudSection({
   displayKey,
   searchPlaceholder = "Buscar...",
   searchKeys,
+  headerExtra,
+  onCreateSuccess,
 }: Props) {
   const [records, setRecords] = useState<Row[]>(initialData);
   const [search, setSearch] = useState("");
@@ -98,6 +103,7 @@ export function CrudSection({
     setRecords([{ ...data, [idKey]: newId }, ...records]);
     setModal(null);
     flash(`${title}: registro creado (#${newId})`);
+    onCreateSuccess?.(data);
   }
 
   function handleEdit(data: Row) {
@@ -125,7 +131,8 @@ export function CrudSection({
           <h1 className="font-display text-2xl font-bold uppercase tracking-wide">
             {title}
           </h1>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {headerExtra}
             <input
               value={search}
               onChange={(e) => {
@@ -305,6 +312,19 @@ function FormModal({
   onSubmit: (data: Row) => void;
   onClose: () => void;
 }) {
+  const { cotizaciones, getCotizacion } = useCotizaciones();
+  const [arsValues, setArsValues] = useState<Record<string, string>>({});
+  const [dolarTypes, setDolarTypes] = useState<Record<string, string>>({});
+
+  function getPreviewUsd(fieldName: string): string | null {
+    const ars = parseFloat(arsValues[fieldName] || "");
+    const tipo = dolarTypes[fieldName];
+    if (!ars || !tipo) return null;
+    const cotiz = getCotizacion(tipo);
+    if (!cotiz) return null;
+    return formatUSD(ars / cotiz);
+  }
+
   return (
     <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-black/40 pt-16 pb-8">
       <form
@@ -314,8 +334,13 @@ function FormModal({
           const fd = new FormData(e.currentTarget);
           const data: Row = {};
           for (const f of fields) {
-            const v = fd.get(f.name);
-            data[f.name] = f.type === "number" ? Number(v) : v;
+            if (f.type === "price") {
+              data[`${f.name}_ars`] = Number(fd.get(`${f.name}_ars`));
+              data[`${f.name}_tipo_dolar`] = fd.get(`${f.name}_tipo_dolar`);
+            } else {
+              const v = fd.get(f.name);
+              data[f.name] = f.type === "number" ? Number(v) : v;
+            }
           }
           onSubmit(data);
         }}
@@ -331,50 +356,106 @@ function FormModal({
           {title}
         </h2>
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {fields.map((f) => (
-            <label
-              key={f.name}
-              className={`block ${f.span === 2 ? "sm:col-span-2" : ""}`}
-            >
-              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">
-                {f.label}
-              </span>
-              {f.type === "select" ? (
-                <select
-                  name={f.name}
-                  required={f.required}
-                  defaultValue={(initialValues?.[f.name] as string) ?? ""}
-                  className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]"
-                >
-                  <option value="">Seleccionar</option>
-                  {f.options?.map((opt) => (
-                    <option key={opt} value={opt}>
-                      {opt}
-                    </option>
-                  ))}
-                </select>
-              ) : f.type === "textarea" ? (
-                <textarea
-                  name={f.name}
-                  required={f.required}
-                  defaultValue={(initialValues?.[f.name] as string) ?? ""}
-                  rows={3}
-                  placeholder={f.placeholder}
-                  className="w-full border border-honda-line px-3 py-2 text-sm outline-none focus:border-[#CC0000]"
-                />
-              ) : (
-                <input
-                  name={f.name}
-                  type={f.type}
-                  required={f.required}
-                  step={f.step}
-                  defaultValue={(initialValues?.[f.name] as string) ?? ""}
-                  placeholder={f.placeholder}
-                  className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]"
-                />
-              )}
-            </label>
-          ))}
+          {fields.map((f) => {
+            if (f.type === "price") {
+              const preview = getPreviewUsd(f.name);
+              return (
+                <div key={f.name} className="sm:col-span-2">
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">
+                    {f.label}
+                  </span>
+                  <div className="flex items-start gap-3">
+                    <label className="block flex-1">
+                      <span className="mb-1 block text-[10px] text-honda-muted">Precio ARS</span>
+                      <input
+                        name={`${f.name}_ars`}
+                        type="number"
+                        step="0.01"
+                        required={f.required}
+                        placeholder="Monto en pesos"
+                        defaultValue={(initialValues?.[`${f.name}_ars`] as string) ?? ""}
+                        onChange={(e) => setArsValues((p) => ({ ...p, [f.name]: e.target.value }))}
+                        className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]"
+                      />
+                    </label>
+                    <label className="block w-36">
+                      <span className="mb-1 block text-[10px] text-honda-muted">Tipo Dólar</span>
+                      <select
+                        name={`${f.name}_tipo_dolar`}
+                        required={f.required}
+                        defaultValue={(initialValues?.[`${f.name}_tipo_dolar`] as string) ?? ""}
+                        onChange={(e) => setDolarTypes((p) => ({ ...p, [f.name]: e.target.value }))}
+                        className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]"
+                      >
+                        <option value="">Seleccionar</option>
+                        {cotizaciones.map((c) => (
+                          <option key={c.tipo_dolar} value={c.tipo_dolar}>
+                            {c.tipo_dolar} (${c.valor_venta})
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="w-32 pt-4">
+                      {preview ? (
+                        <span className="block rounded bg-green-50 px-2 py-2 text-center text-sm font-semibold text-green-800">
+                          {preview}
+                        </span>
+                      ) : (
+                        <span className="block rounded bg-gray-50 px-2 py-2 text-center text-xs text-honda-muted">
+                          USD —
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+
+            return (
+              <label
+                key={f.name}
+                className={`block ${f.span === 2 ? "sm:col-span-2" : ""}`}
+              >
+                <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">
+                  {f.label}
+                </span>
+                {f.type === "select" ? (
+                  <select
+                    name={f.name}
+                    required={f.required}
+                    defaultValue={(initialValues?.[f.name] as string) ?? ""}
+                    className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]"
+                  >
+                    <option value="">Seleccionar</option>
+                    {f.options?.map((opt) => (
+                      <option key={opt} value={opt}>
+                        {opt}
+                      </option>
+                    ))}
+                  </select>
+                ) : f.type === "textarea" ? (
+                  <textarea
+                    name={f.name}
+                    required={f.required}
+                    defaultValue={(initialValues?.[f.name] as string) ?? ""}
+                    rows={3}
+                    placeholder={f.placeholder}
+                    className="w-full border border-honda-line px-3 py-2 text-sm outline-none focus:border-[#CC0000]"
+                  />
+                ) : (
+                  <input
+                    name={f.name}
+                    type={f.type}
+                    required={f.required}
+                    step={f.step}
+                    defaultValue={(initialValues?.[f.name] as string) ?? ""}
+                    placeholder={f.placeholder}
+                    className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]"
+                  />
+                )}
+              </label>
+            );
+          })}
         </div>
         <div className="mt-6 flex gap-3">
           <button
