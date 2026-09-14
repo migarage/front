@@ -18,6 +18,7 @@ export const SECTIONS = [
   { href: "/proveedores", label: "Proveedores", desc: "ABM de proveedores y cuenta corriente." },
   { href: "/clientes", label: "Clientes", desc: "ABM de clientes y saldos de cuenta." },
   { href: "/analisis", label: "Análisis", desc: "Dashboard de KPIs, canales y márgenes." },
+  { href: "/mercadolibre", label: "MercadoLibre", desc: "Publicaciones, ventas ML y monitor de precios." },
 ] as const;
 
 export const FOOTER_LINKS = [

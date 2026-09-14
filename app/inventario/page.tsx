@@ -41,11 +41,6 @@ const CREATE_FIELDS: FormField[] = [
   { name: "id_marca", label: "Marca", type: "select", options: ["Bosch", "Mann Filter", "NGK", "Mahle", "Fram", "Motorcraft", "ACDelco"] },
   { name: "cantidad_inicial", label: "Cantidad Inicial", type: "number", required: true },
   { name: "ubicacion", label: "Ubicación", type: "text", required: true, placeholder: "Estante B-12" },
-  { name: "coef_minorista", label: "Coef. Minorista", type: "number", step: "0.01", placeholder: "1.40" },
-  { name: "coef_mayorista", label: "Coef. Mayorista", type: "number", step: "0.01", placeholder: "1.15" },
-  { name: "coef_ml", label: "Coef. MercadoLibre", type: "number", step: "0.01", placeholder: "1.35" },
-  { name: "coef_agencia", label: "Coef. Agencia", type: "number", step: "0.01", placeholder: "1.10" },
-  { name: "coef_efectivo", label: "Coef. Efectivo", type: "number", step: "0.01", placeholder: "1.05" },
 ];
 
 const EDIT_FIELDS: FormField[] = [
@@ -57,11 +52,6 @@ const EDIT_FIELDS: FormField[] = [
   { name: "precio", label: "Precio de Lista", type: "price" },
   { name: "proveedor_habitual", label: "Proveedor", type: "select", options: ["Bosch Argentina", "Mann Filter", "NGK", "Mahle", "Fram"] },
   { name: "id_marca", label: "Marca", type: "select", options: ["Bosch", "Mann Filter", "NGK", "Mahle", "Fram", "Motorcraft", "ACDelco"] },
-  { name: "coef_minorista", label: "Coef. Minorista", type: "number", step: "0.01" },
-  { name: "coef_mayorista", label: "Coef. Mayorista", type: "number", step: "0.01" },
-  { name: "coef_ml", label: "Coef. MercadoLibre", type: "number", step: "0.01" },
-  { name: "coef_agencia", label: "Coef. Agencia", type: "number", step: "0.01" },
-  { name: "coef_efectivo", label: "Coef. Efectivo", type: "number", step: "0.01" },
 ];
 
 const MOCK = [

@@ -128,7 +128,13 @@ const TRANSICIONES: Record<string, string[]> = {
   DEVOLUCION_PARCIAL: [],
 };
 
-const CANALES = ["Minorista", "Mayorista", "MercadoLibre", "Agencia", "Efectivo"];
+const MOCK_COEFICIENTES: { canal_venta: string; coeficiente: number }[] = [
+  { canal_venta: "Minorista", coeficiente: 1.40 },
+  { canal_venta: "Mayorista", coeficiente: 1.15 },
+  { canal_venta: "MercadoLibre", coeficiente: 1.35 },
+  { canal_venta: "Agencia", coeficiente: 1.10 },
+  { canal_venta: "Efectivo", coeficiente: 1.05 },
+];
 const FORMAS_PAGO = ["Efectivo", "Transferencia", "Cheque", "Tarjeta", "Cuenta Corriente"];
 
 type VentaItem = {
@@ -277,11 +283,11 @@ const MOCK: Venta[] = [
 ];
 
 const MOCK_PRODUCTOS = [
-  { codigo_producto: "REP-8834", descripcion: "Filtro de Aceite sintético reforzado V2", precio_usd_lista: 48.0 },
-  { codigo_producto: "REP-1201", descripcion: "Pastillas de freno delanteras cerámicas", precio_usd_lista: 32.0 },
-  { codigo_producto: "REP-9999", descripcion: "Válvula EGR electrónica", precio_usd_lista: 125.0 },
-  { codigo_producto: "REP-5501", descripcion: "Bujía de encendido iridium", precio_usd_lista: 8.5 },
-  { codigo_producto: "REP-3300", descripcion: "Correa de distribución reforzada", precio_usd_lista: 65.0 },
+  { codigo_producto: "REP-8834", descripcion: "Filtro de Aceite sintético reforzado V2", precio_usd_lista: 48.0, stock: 45 },
+  { codigo_producto: "REP-1201", descripcion: "Pastillas de freno delanteras cerámicas", precio_usd_lista: 32.0, stock: 120 },
+  { codigo_producto: "REP-9999", descripcion: "Válvula EGR electrónica", precio_usd_lista: 125.0, stock: 8 },
+  { codigo_producto: "REP-5501", descripcion: "Bujía de encendido iridium", precio_usd_lista: 8.5, stock: 340 },
+  { codigo_producto: "REP-3300", descripcion: "Correa de distribución reforzada", precio_usd_lista: 65.0, stock: 0 },
 ];
 
 const MOCK_FACTURAS: Record<string, FacturaVentaDetail> = {
@@ -372,7 +378,7 @@ type ModalState =
   | { type: "delete"; venta: Venta }
   | { type: "cambio_estado"; venta: Venta }
   | { type: "devolucion"; venta: Venta }
-  | { type: "pendiente_recibo"; venta: Venta }
+  | { type: "preparar_pedido"; venta: Venta }
   | { type: "completar"; venta: Venta }
   | { type: "facturar"; ventas: Venta[] }
   | { type: "factura_detail"; factura: FacturaVentaDetail }
@@ -623,11 +629,31 @@ export default function VentasPage() {
         continue;
       }
       if (t === "PENDIENTE_RECIBO_MERCADERIA") {
-        actions.push({
-          label: "Pend. Recibo",
-          onClick: () => setModal({ type: "pendiente_recibo", venta }),
-          variant: "default",
-        });
+        if (venta.estado_venta === "NOTA_DE_PEDIDO") {
+          if (!actions.some((a) => a.label === "Preparar Pedido")) {
+            actions.push({
+              label: "Preparar Pedido",
+              onClick: () => setModal({ type: "preparar_pedido", venta }),
+              variant: "default",
+            });
+          }
+        } else {
+          actions.push({
+            label: "Pend. Recibo",
+            onClick: () => setModal({ type: "preparar_pedido", venta }),
+            variant: "default",
+          });
+        }
+        continue;
+      }
+      if (t === "PENDIENTE_ENTREGA_CLIENTE" && venta.estado_venta === "NOTA_DE_PEDIDO") {
+        if (!actions.some((a) => a.label === "Preparar Pedido")) {
+          actions.push({
+            label: "Preparar Pedido",
+            onClick: () => setModal({ type: "preparar_pedido", venta }),
+            variant: "default",
+          });
+        }
         continue;
       }
       if (t === "ENTREGADO_PARCIAL" || t === "ENTREGADO_TOTAL") {
@@ -928,15 +954,19 @@ export default function VentasPage() {
             onClose={() => setModal(null)}
           />
         )}
-        {modal?.type === "pendiente_recibo" && (
+        {modal?.type === "preparar_pedido" && (
           <PendienteReciboModal
-            items={modal.venta.items.map((i) => ({
+            items={modal.venta.items.filter((i) => i.estado_item !== "ANULADO").map((i) => ({
               id_detalle_venta: i.id_detalle_venta,
               codigo_producto: i.codigo_producto,
               descripcion_item: i.descripcion_item,
               cantidad: i.cantidad,
+              stock_disponible: MOCK_PRODUCTOS.find((p) => p.codigo_producto === i.codigo_producto)?.stock ?? 0,
             }))}
-            onConfirm={() => handleEstadoChange(modal.venta.id_venta, "PENDIENTE_RECIBO_MERCADERIA")}
+            onConfirm={(data) => {
+              handleEstadoChange(modal.venta.id_venta, data.estado_resultante);
+              setModal(null);
+            }}
             onClose={() => setModal(null)}
           />
         )}
@@ -1050,11 +1080,38 @@ function CreateVentaModal({
   const { cotizaciones, getCotizacion } = useCotizaciones();
   const [cliente, setCliente] = useState<ClienteResult | null>(null);
   const [iniciarComoNdP, setIniciarComoNdP] = useState(false);
+  const [canalVenta, setCanalVenta] = useState("");
   const [items, setItems] = useState<{ codigo_producto: string; cantidad: number; precio_ars: string; tipo_dolar: string; descuento_pct: string; descuento_ars: string }[]>([
     { codigo_producto: "", cantidad: 1, precio_ars: "", tipo_dolar: "", descuento_pct: "0", descuento_ars: "0" },
   ]);
   const [descGeneralPct, setDescGeneralPct] = useState("0");
   const [descGeneralArs, setDescGeneralArs] = useState("0");
+
+  const coeficienteActual = MOCK_COEFICIENTES.find((c) => c.canal_venta === canalVenta)?.coeficiente ?? null;
+
+  function suggestPrice(codigoProducto: string, tipoDolar: string, coef: number | null): string {
+    if (!coef || !codigoProducto || !tipoDolar) return "";
+    const prod = MOCK_PRODUCTOS.find((p) => p.codigo_producto === codigoProducto);
+    if (!prod || !prod.precio_usd_lista) return "";
+    const cotiz = getCotizacion(tipoDolar);
+    if (!cotiz) return "";
+    return String((prod.precio_usd_lista * cotiz * coef).toFixed(2));
+  }
+
+  function handleCanalChange(newCanal: string) {
+    setCanalVenta(newCanal);
+    const coef = MOCK_COEFICIENTES.find((c) => c.canal_venta === newCanal)?.coeficiente ?? null;
+    if (!coef || iniciarComoNdP) return;
+    setItems((prev) =>
+      prev.map((item) => {
+        const suggested = suggestPrice(item.codigo_producto, item.tipo_dolar, coef);
+        if (!suggested) return item;
+        const descPct = parseFloat(item.descuento_pct) || 0;
+        const descArs = descPct > 0 ? String((parseFloat(suggested) * descPct / 100).toFixed(2)) : "0";
+        return { ...item, precio_ars: suggested, descuento_ars: descArs };
+      }),
+    );
+  }
 
   function addItem() {
     setItems([...items, { codigo_producto: "", cantidad: 1, precio_ars: "", tipo_dolar: "", descuento_pct: "0", descuento_ars: "0" }]);
@@ -1069,6 +1126,18 @@ function CreateVentaModal({
     setItems(items.map((item, i) => {
       if (i !== idx) return item;
       const updated = { ...item, [field]: value };
+
+      if ((field === "codigo_producto" || field === "tipo_dolar") && coeficienteActual && !iniciarComoNdP) {
+        const cod = field === "codigo_producto" ? String(value) : updated.codigo_producto;
+        const dolar = field === "tipo_dolar" ? String(value) : updated.tipo_dolar;
+        const suggested = suggestPrice(cod, dolar, coeficienteActual);
+        if (suggested) {
+          updated.precio_ars = suggested;
+          const descPct = parseFloat(updated.descuento_pct) || 0;
+          updated.descuento_ars = descPct > 0 ? String((parseFloat(suggested) * descPct / 100).toFixed(2)) : "0";
+        }
+      }
+
       const precioArs = parseFloat(field === "precio_ars" ? String(value) : updated.precio_ars) || 0;
       if (field === "descuento_pct" && precioArs > 0) {
         const pct = parseFloat(String(value)) || 0;
@@ -1126,7 +1195,7 @@ function CreateVentaModal({
       cliente_razon_social: cliente.razon_social,
       cliente_cuit: cliente.cuit,
       id_cliente: cliente.id_cliente,
-      canal_venta_aplicado: String(fd.get("canal_venta_aplicado")),
+      canal_venta_aplicado: canalVenta,
       monto_total_venta: montoTotal,
       descuento_general_porcentaje: dGralPct,
       descuento_general_monto: descGeneralEfectivo,
@@ -1163,9 +1232,19 @@ function CreateVentaModal({
           <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <label className="block">
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Canal de Venta *</span>
-              <select name="canal_venta_aplicado" required className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]">
+              <select
+                name="canal_venta_aplicado"
+                required
+                value={canalVenta}
+                onChange={(e) => handleCanalChange(e.target.value)}
+                className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]"
+              >
                 <option value="">Seleccionar</option>
-                {CANALES.map((c) => <option key={c} value={c}>{c}</option>)}
+                {MOCK_COEFICIENTES.map((c) => (
+                  <option key={c.canal_venta} value={c.canal_venta}>
+                    {c.canal_venta} (x{c.coeficiente.toFixed(2)})
+                  </option>
+                ))}
               </select>
             </label>
             <label className="block">
@@ -1204,8 +1283,8 @@ function CreateVentaModal({
             </div>
             <div className="mt-3 space-y-3">
               {items.map((item, idx) => (
-                <div key={idx} className="flex items-start gap-3 border border-honda-line p-3">
-                  <label className="block flex-1">
+                <div key={idx} className="flex flex-wrap items-start gap-3 border border-honda-line p-3">
+                  <label className="block min-w-[220px] flex-1">
                     <span className="mb-1 block text-[10px] text-honda-muted">Producto</span>
                     <select
                       value={item.codigo_producto}
@@ -1221,6 +1300,15 @@ function CreateVentaModal({
                       ))}
                     </select>
                   </label>
+                  <div className="w-16 shrink-0">
+                    <span className="mb-1 block text-[10px] text-honda-muted">Stock</span>
+                    {(() => {
+                      const prod = MOCK_PRODUCTOS.find((p) => p.codigo_producto === item.codigo_producto);
+                      if (!prod) return <span className="block h-9 leading-9 text-center text-xs text-honda-muted">—</span>;
+                      const color = prod.stock <= 0 ? "text-red-600 bg-red-50" : prod.stock < 10 ? "text-orange-600 bg-orange-50" : "text-green-700 bg-green-50";
+                      return <span className={`block h-9 rounded leading-9 text-center text-xs font-semibold ${color}`}>{prod.stock}</span>;
+                    })()}
+                  </div>
                   <label className="block w-20">
                     <span className="mb-1 block text-[10px] text-honda-muted">Cant.</span>
                     <input
@@ -1400,6 +1488,7 @@ function EditVentaModal({
 }) {
   const { cotizaciones, getCotizacion } = useCotizaciones();
   const transiciones = TRANSICIONES[venta.estado_venta] ?? [];
+  const [canalVenta, setCanalVenta] = useState(venta.canal_venta_aplicado);
   const [items, setItems] = useState(
     venta.items.map((i) => ({
       codigo_producto: i.codigo_producto,
@@ -1412,6 +1501,32 @@ function EditVentaModal({
   );
   const [descGeneralPct, setDescGeneralPct] = useState(String(venta.descuento_general_porcentaje ?? 0));
   const [descGeneralArs, setDescGeneralArs] = useState(String(venta.descuento_general_monto ?? 0));
+
+  const coeficienteActual = MOCK_COEFICIENTES.find((c) => c.canal_venta === canalVenta)?.coeficiente ?? null;
+
+  function suggestPrice(codigoProducto: string, tipoDolar: string, coef: number | null): string {
+    if (!coef || !codigoProducto || !tipoDolar) return "";
+    const prod = MOCK_PRODUCTOS.find((p) => p.codigo_producto === codigoProducto);
+    if (!prod || !prod.precio_usd_lista) return "";
+    const cotiz = getCotizacion(tipoDolar);
+    if (!cotiz) return "";
+    return String((prod.precio_usd_lista * cotiz * coef).toFixed(2));
+  }
+
+  function handleCanalChange(newCanal: string) {
+    setCanalVenta(newCanal);
+    const coef = MOCK_COEFICIENTES.find((c) => c.canal_venta === newCanal)?.coeficiente ?? null;
+    if (!coef || !venta.precios_congelados) return;
+    setItems((prev) =>
+      prev.map((item) => {
+        const suggested = suggestPrice(item.codigo_producto, item.tipo_dolar, coef);
+        if (!suggested) return item;
+        const descPct = parseFloat(item.descuento_pct) || 0;
+        const descArs = descPct > 0 ? String((parseFloat(suggested) * descPct / 100).toFixed(2)) : "0";
+        return { ...item, precio_ars: suggested, descuento_ars: descArs };
+      }),
+    );
+  }
 
   function addItem() {
     setItems([...items, { codigo_producto: "", cantidad: 1, precio_ars: "", tipo_dolar: "", descuento_pct: "0", descuento_ars: "0" }]);
@@ -1426,6 +1541,18 @@ function EditVentaModal({
     setItems(items.map((item, i) => {
       if (i !== idx) return item;
       const updated = { ...item, [field]: value };
+
+      if ((field === "codigo_producto" || field === "tipo_dolar") && coeficienteActual && venta.precios_congelados) {
+        const cod = field === "codigo_producto" ? String(value) : updated.codigo_producto;
+        const dolar = field === "tipo_dolar" ? String(value) : updated.tipo_dolar;
+        const suggested = suggestPrice(cod, dolar, coeficienteActual);
+        if (suggested) {
+          updated.precio_ars = suggested;
+          const descPct = parseFloat(updated.descuento_pct) || 0;
+          updated.descuento_ars = descPct > 0 ? String((parseFloat(suggested) * descPct / 100).toFixed(2)) : "0";
+        }
+      }
+
       const precioArs = parseFloat(field === "precio_ars" ? String(value) : updated.precio_ars) || 0;
       if (field === "descuento_pct" && precioArs > 0) {
         const pct = parseFloat(String(value)) || 0;
@@ -1478,6 +1605,7 @@ function EditVentaModal({
     onConfirm({
       ...venta,
       estado_venta: nuevoEstado,
+      canal_venta_aplicado: canalVenta,
       forma_pago: String(fd.get("forma_pago") || venta.forma_pago),
       descuento_general_porcentaje: dGralPct,
       descuento_general_monto: descGeneralEfectivo,
@@ -1516,8 +1644,22 @@ function EditVentaModal({
               <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Avanzar estado</span>
               <select name="estado_venta" defaultValue="" className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]">
                 <option value="">Mantener ({ESTADO_LABELS[venta.estado_venta]})</option>
-                {transiciones.filter((t) => t !== "ANULADO" && t !== "DEVOLUCION" && t !== "DEVOLUCION_PARCIAL" && t !== "PENDIENTE_RECIBO_MERCADERIA").map((t) => (
+                {transiciones.filter((t) => t !== "ANULADO" && t !== "DEVOLUCION" && t !== "DEVOLUCION_PARCIAL" && t !== "PENDIENTE_RECIBO_MERCADERIA" && !(venta.estado_venta === "NOTA_DE_PEDIDO" && t === "PENDIENTE_ENTREGA_CLIENTE")).map((t) => (
                   <option key={t} value={t}>{ESTADO_LABELS[t]}</option>
+                ))}
+              </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Canal de Venta</span>
+              <select
+                value={canalVenta}
+                onChange={(e) => handleCanalChange(e.target.value)}
+                className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]"
+              >
+                {MOCK_COEFICIENTES.map((c) => (
+                  <option key={c.canal_venta} value={c.canal_venta}>
+                    {c.canal_venta} (x{c.coeficiente.toFixed(2)})
+                  </option>
                 ))}
               </select>
             </label>
@@ -1539,8 +1681,8 @@ function EditVentaModal({
             </div>
             <div className="mt-3 space-y-3">
               {items.map((item, idx) => (
-                <div key={idx} className="flex items-start gap-3 border border-honda-line p-3">
-                  <label className="block flex-1">
+                <div key={idx} className="flex flex-wrap items-start gap-3 border border-honda-line p-3">
+                  <label className="block min-w-[220px] flex-1">
                     <span className="mb-1 block text-[10px] text-honda-muted">Producto</span>
                     <select
                       value={item.codigo_producto}
@@ -1556,6 +1698,15 @@ function EditVentaModal({
                       ))}
                     </select>
                   </label>
+                  <div className="w-16 shrink-0">
+                    <span className="mb-1 block text-[10px] text-honda-muted">Stock</span>
+                    {(() => {
+                      const prod = MOCK_PRODUCTOS.find((p) => p.codigo_producto === item.codigo_producto);
+                      if (!prod) return <span className="block h-9 leading-9 text-center text-xs text-honda-muted">—</span>;
+                      const color = prod.stock <= 0 ? "text-red-600 bg-red-50" : prod.stock < 10 ? "text-orange-600 bg-orange-50" : "text-green-700 bg-green-50";
+                      return <span className={`block h-9 rounded leading-9 text-center text-xs font-semibold ${color}`}>{prod.stock}</span>;
+                    })()}
+                  </div>
                   <label className="block w-20">
                     <span className="mb-1 block text-[10px] text-honda-muted">Cant.</span>
                     <input

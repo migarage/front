@@ -88,6 +88,64 @@ CREATE TABLE historico_precios (
 
 
 -- ============================================================================
+-- 1.5 LISTAS DE PRECIOS DE PROVEEDORES
+-- ============================================================================
+-- Un proveedor tiene muchas listas de precios; no se comparten entre proveedores.
+-- Cada lista se carga para una fecha y contiene N productos.
+-- El precio vigente de un producto es el de la última lista que lo incluyó.
+-- La carga se realiza por importación de archivos (Excel, PDF, CSV, fotos)
+-- que el frontend envía como base64 al backend para parseo.
+
+CREATE TABLE listas_precio (
+    id_lista_precio INT AUTO_INCREMENT PRIMARY KEY,
+    id_proveedor INT NOT NULL,
+    fecha_lista DATE NOT NULL,
+    fecha_carga DATETIME DEFAULT CURRENT_TIMESTAMP,
+    nombre_archivo VARCHAR(255),
+    tipo_archivo VARCHAR(50),
+    cantidad_items INT NOT NULL DEFAULT 0,
+    observaciones TEXT,
+    FOREIGN KEY (id_proveedor) REFERENCES proveedores(id_proveedor)
+);
+
+CREATE TABLE detalle_lista_precio (
+    id_detalle_lista INT AUTO_INCREMENT PRIMARY KEY,
+    id_lista_precio INT NOT NULL,
+    codigo_producto VARCHAR(50) NOT NULL,
+    descripcion VARCHAR(255) NOT NULL,
+    precio DECIMAL(12, 4) NOT NULL,
+    moneda VARCHAR(50) NOT NULL,
+    aplicacion TEXT,
+    FOREIGN KEY (id_lista_precio) REFERENCES listas_precio(id_lista_precio),
+    FOREIGN KEY (codigo_producto) REFERENCES productos(codigo_producto)
+);
+
+
+-- ============================================================================
+-- 1.6 COEFICIENTES POR CANAL DE VENTA (CONFIGURACIÓN GLOBAL)
+-- ============================================================================
+-- Define el coeficiente de markup para cada canal de venta.
+-- Se aplica sobre precio_usd_lista × cotización para sugerir el precio ARS.
+-- El coeficiente es global: se usa para TODOS los productos.
+-- El usuario puede override el precio sugerido al crear la venta.
+
+CREATE TABLE coeficientes_canal (
+    id_coeficiente INT AUTO_INCREMENT PRIMARY KEY,
+    canal_venta VARCHAR(50) NOT NULL UNIQUE,
+    coeficiente DECIMAL(5, 2) NOT NULL DEFAULT 1.00,
+    activo BOOLEAN NOT NULL DEFAULT TRUE,
+    orden INT NOT NULL DEFAULT 0
+);
+
+INSERT INTO coeficientes_canal (canal_venta, coeficiente, orden) VALUES
+    ('Minorista', 1.40, 1),
+    ('Mayorista', 1.15, 2),
+    ('MercadoLibre', 1.35, 3),
+    ('Agencia', 1.10, 4),
+    ('Efectivo', 1.05, 5);
+
+
+-- ============================================================================
 -- 2. CIRCUITO DE COMPRAS A PROVEEDORES
 -- ============================================================================
 
@@ -184,6 +242,8 @@ CREATE TABLE detalle_factura_compra (
     descripcion VARCHAR(255) NOT NULL,
     cantidad INT NOT NULL DEFAULT 1,
     precio_unitario DECIMAL(12, 4) NOT NULL,
+    alicuota_iva DECIMAL(5, 2) NOT NULL DEFAULT 21.00,
+    monto_iva DECIMAL(12, 4) NOT NULL DEFAULT 0,
     monto_subtotal DECIMAL(12, 4) NOT NULL,
     tipo_dolar VARCHAR(50),
     tipo_cambio_conversion DECIMAL(10, 2),
@@ -215,6 +275,8 @@ CREATE TABLE detalle_devolucion_compra (
     cantidad_devuelta INT NOT NULL DEFAULT 1,
     motivo_falla VARCHAR(255),
     precio_unitario DECIMAL(12, 4) NOT NULL,
+    alicuota_iva DECIMAL(5, 2) NOT NULL DEFAULT 21.00,
+    monto_iva DECIMAL(12, 4) NOT NULL DEFAULT 0,
     monto_subtotal DECIMAL(12, 4) NOT NULL,
     FOREIGN KEY (id_devolucion_compra) REFERENCES devoluciones_compra(id_devolucion_compra),
     FOREIGN KEY (id_detalle_remito) REFERENCES detalle_remito_compra(id_detalle_remito),
@@ -275,6 +337,7 @@ CREATE TABLE detalle_venta (
     precio_unitario_sin_iva DECIMAL(12, 4) NOT NULL,
     descuento_porcentaje DECIMAL(5, 2) DEFAULT 0,
     descuento_monto DECIMAL(12, 4) DEFAULT 0,
+    alicuota_iva DECIMAL(5, 2) NOT NULL DEFAULT 21.00,
     monto_iva DECIMAL(12, 4) NOT NULL,
     monto_total_linea DECIMAL(12, 4) NOT NULL,
     tipo_dolar VARCHAR(50),
@@ -342,6 +405,7 @@ CREATE TABLE detalle_factura_venta (
     descripcion_item VARCHAR(255) NOT NULL,
     cantidad INT NOT NULL DEFAULT 1,
     precio_unitario_sin_iva DECIMAL(12, 4) NOT NULL,
+    alicuota_iva DECIMAL(5, 2) NOT NULL DEFAULT 21.00,
     monto_iva DECIMAL(12, 4) NOT NULL,
     monto_total_linea DECIMAL(12, 4) NOT NULL,
     FOREIGN KEY (id_factura_venta) REFERENCES facturas_venta(id_factura_venta),
@@ -397,6 +461,8 @@ CREATE TABLE detalle_devolucion (
     codigo_producto VARCHAR(50) NOT NULL,
     cantidad_devuelta INT NOT NULL DEFAULT 1,
     precio_unitario DECIMAL(12, 4) NOT NULL,
+    alicuota_iva DECIMAL(5, 2) NOT NULL DEFAULT 21.00,
+    monto_iva DECIMAL(12, 4) NOT NULL DEFAULT 0,
     monto_subtotal DECIMAL(12, 4) NOT NULL,
     FOREIGN KEY (id_devolucion) REFERENCES devoluciones(id_devolucion),
     FOREIGN KEY (id_detalle_venta) REFERENCES detalle_venta(id_detalle_venta),
@@ -487,4 +553,111 @@ CREATE TABLE detalle_orden_pago_medios (
     numero_operacion VARCHAR(100),
     banco VARCHAR(100),
     FOREIGN KEY (id_orden_pago) REFERENCES ordenes_pago(id_orden_pago)
+);
+
+
+-- ============================================================================
+-- 7. INTEGRACIÓN MERCADOLIBRE
+-- ============================================================================
+
+-- Credenciales OAuth de MercadoLibre (una fila por cuenta vinculada)
+CREATE TABLE ml_credenciales (
+    id_credencial INT AUTO_INCREMENT PRIMARY KEY,
+    ml_user_id VARCHAR(50) NOT NULL UNIQUE,
+    ml_nickname VARCHAR(100),
+    access_token TEXT NOT NULL,
+    refresh_token TEXT NOT NULL,
+    expires_at DATETIME NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Publicaciones en MercadoLibre vinculadas a productos locales
+CREATE TABLE ml_publicaciones (
+    id_publicacion INT AUTO_INCREMENT PRIMARY KEY,
+    codigo_producto VARCHAR(50) NOT NULL,
+    ml_item_id VARCHAR(20),
+    titulo VARCHAR(60) NOT NULL,
+    precio DECIMAL(12, 2) NOT NULL,
+    moneda VARCHAR(3) DEFAULT 'ARS',
+    estado_ml VARCHAR(20) DEFAULT 'draft',
+    tipo_publicacion VARCHAR(20) DEFAULT 'gold_special',
+    condicion VARCHAR(10) DEFAULT 'new',
+    cantidad_disponible INT NOT NULL DEFAULT 0,
+    ml_permalink VARCHAR(500),
+    ml_thumbnail VARCHAR(500),
+    sincronizado_at DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (codigo_producto) REFERENCES productos(codigo_producto)
+);
+
+-- Órdenes de MercadoLibre vinculadas a ventas locales
+CREATE TABLE ml_ordenes (
+    id_orden_ml INT AUTO_INCREMENT PRIMARY KEY,
+    ml_order_id BIGINT NOT NULL UNIQUE,
+    ml_pack_id BIGINT,
+    id_venta INT,
+    ml_buyer_id BIGINT NOT NULL,
+    buyer_nickname VARCHAR(100),
+    buyer_nombre VARCHAR(255),
+    estado_orden VARCHAR(30),
+    estado_envio VARCHAR(30),
+    ml_shipment_id BIGINT,
+    monto_total DECIMAL(12, 2) NOT NULL,
+    monto_comision_ml DECIMAL(12, 2) DEFAULT 0,
+    monto_envio DECIMAL(12, 2) DEFAULT 0,
+    fecha_orden DATETIME NOT NULL,
+    fecha_sync DATETIME DEFAULT CURRENT_TIMESTAMP,
+    raw_json JSON,
+    FOREIGN KEY (id_venta) REFERENCES ventas(id_venta)
+);
+
+-- Preguntas de compradores en publicaciones ML
+CREATE TABLE ml_preguntas (
+    id_pregunta_local INT AUTO_INCREMENT PRIMARY KEY,
+    ml_question_id BIGINT NOT NULL UNIQUE,
+    id_publicacion INT NOT NULL,
+    ml_item_id VARCHAR(20) NOT NULL,
+    buyer_nickname VARCHAR(100),
+    texto_pregunta TEXT NOT NULL,
+    texto_respuesta TEXT,
+    estado VARCHAR(20) DEFAULT 'UNANSWERED',
+    fecha_pregunta DATETIME NOT NULL,
+    fecha_respuesta DATETIME,
+    FOREIGN KEY (id_publicacion) REFERENCES ml_publicaciones(id_publicacion)
+);
+
+
+-- ============================================================================
+-- 7.5 SCRAPING DE PRECIOS DE COMPETENCIA (MERCADOLIBRE)
+-- ============================================================================
+
+-- Configuración de artículos a monitorear
+CREATE TABLE ml_scraping_config (
+    id_config INT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(150) NOT NULL,
+    query_busqueda VARCHAR(255) NOT NULL,
+    categoria_ml VARCHAR(20),
+    condicion VARCHAR(10) DEFAULT 'new',
+    activo BOOLEAN DEFAULT TRUE,
+    codigo_producto VARCHAR(50),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (codigo_producto) REFERENCES productos(codigo_producto)
+);
+
+-- Resultados diarios del scraping
+CREATE TABLE ml_scraping_resultados (
+    id_resultado INT AUTO_INCREMENT PRIMARY KEY,
+    id_config INT NOT NULL,
+    fecha DATE NOT NULL,
+    total_publicaciones INT NOT NULL,
+    precio_minimo DECIMAL(12, 2),
+    precio_maximo DECIMAL(12, 2),
+    precio_promedio DECIMAL(12, 2),
+    precio_mediana DECIMAL(12, 2),
+    publicaciones_envio_gratis INT DEFAULT 0,
+    top_vendedor_precio DECIMAL(12, 2),
+    raw_sample JSON,
+    UNIQUE (id_config, fecha),
+    FOREIGN KEY (id_config) REFERENCES ml_scraping_config(id_config)
 );

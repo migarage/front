@@ -238,6 +238,10 @@ function NuevoClienteModal({
               ))}
             </select>
           </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Celular</span>
+            <input name="celular" type="tel" placeholder="+54 11 1234-5678" className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]" />
+          </label>
         </div>
         <div className="mt-6 flex gap-3">
           <button type="submit" className="h-10 bg-[#CC0000] px-6 text-sm font-semibold uppercase tracking-wide text-white hover:bg-[#8B0000]">
