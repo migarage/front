@@ -22,14 +22,7 @@
   "id_proveedor_habitual": 3,
   "id_marca": 2,
   "cantidad_inicial": 50,
-  "ubicacion": "Estante B-12",
-  "precios_venta": [
-    { "canal_venta": "Minorista", "coeficiente_aplicado": 1.40 },
-    { "canal_venta": "Mayorista", "coeficiente_aplicado": 1.15 },
-    { "canal_venta": "MercadoLibre", "coeficiente_aplicado": 1.35 },
-    { "canal_venta": "Agencia", "coeficiente_aplicado": 1.10 },
-    { "canal_venta": "Efectivo", "coeficiente_aplicado": 1.05 }
-  ]
+  "ubicacion": "Estante B-12"
 }
 ```
 
@@ -69,11 +62,7 @@
   "cantidad_disponible": 45,
   "precio_ars": 67200.00,
   "tipo_dolar": "Blue",
-  "id_marca": 2,
-  "precios_venta": [
-    { "canal_venta": "Minorista", "coeficiente_aplicado": 1.42 },
-    { "canal_venta": "Efectivo", "coeficiente_aplicado": 1.00 }
-  ]
+  "id_marca": 2
 }
 ```
 
@@ -152,13 +141,6 @@
       "proveedor_habitual": "Bosch Argentina",
       "marca": "Bosch",
       "activo": true,
-      "precios_venta": {
-        "Minorista": 95424.00,
-        "Mayorista": 78336.00,
-        "MercadoLibre": 91987.20,
-        "Agencia": 74995.20,
-        "Efectivo": 67200.00
-      },
       "fecha_actualizacion": "2026-08-26T12:30:00Z",
 
       "__CAMPOS_CALCULADOS__": "ver notas abajo",
@@ -424,6 +406,93 @@ WHERE i.codigo_producto = :codigo_producto;
 
 ---
 
+## 1.5 Configuración: COEFICIENTES POR CANAL DE VENTA
+
+> **Nota:** Los coeficientes son globales (no por producto). Cada canal tiene un coeficiente único que se aplica al `precio_usd_lista × cotización_dolar` para sugerir el precio ARS de venta. El frontend muestra el coeficiente en el dropdown de canal de venta y recalcula los precios sugeridos al cambiar de canal. El usuario puede override el precio sugerido.
+
+### 1.5.1 Listar Coeficientes — `GET /api/v1/configuracion/coeficientes-canal`
+
+> **Nota:** El frontend consulta este endpoint al cargar la pantalla de ventas (Nueva Venta / Editar Venta). Los coeficientes se muestran entre paréntesis en el dropdown de canal de venta.
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": [
+    { "id_coeficiente": 1, "canal_venta": "Minorista", "coeficiente": 1.40, "activo": true, "orden": 1 },
+    { "id_coeficiente": 2, "canal_venta": "Mayorista", "coeficiente": 1.15, "activo": true, "orden": 2 },
+    { "id_coeficiente": 3, "canal_venta": "MercadoLibre", "coeficiente": 1.35, "activo": true, "orden": 3 },
+    { "id_coeficiente": 4, "canal_venta": "Agencia", "coeficiente": 1.10, "activo": true, "orden": 4 },
+    { "id_coeficiente": 5, "canal_venta": "Efectivo", "coeficiente": 1.05, "activo": true, "orden": 5 }
+  ]
+}
+```
+
+**Lógica backend:**
+1. `SELECT * FROM coeficientes_canal WHERE activo = TRUE ORDER BY orden ASC`.
+2. Devolver todos los canales activos con su coeficiente.
+
+---
+
+### 1.5.2 Actualizar Coeficientes — `PUT /api/v1/configuracion/coeficientes-canal`
+
+> **Nota:** Se envía la lista completa de coeficientes a actualizar. Permite editar coeficientes existentes y agregar nuevos canales.
+
+**Input Payload:**
+```json
+{
+  "coeficientes": [
+    { "canal_venta": "Minorista", "coeficiente": 1.45 },
+    { "canal_venta": "Mayorista", "coeficiente": 1.20 },
+    { "canal_venta": "MercadoLibre", "coeficiente": 1.35 },
+    { "canal_venta": "Agencia", "coeficiente": 1.10 },
+    { "canal_venta": "Efectivo", "coeficiente": 1.05 },
+    { "canal_venta": "Taller", "coeficiente": 1.25 }
+  ]
+}
+```
+
+**Lógica backend:**
+1. Para cada ítem: `INSERT ... ON DUPLICATE KEY UPDATE coeficiente = :coeficiente`.
+2. Actualizar el campo `orden` según la posición en el array.
+3. NO recalcular precios de ventas existentes (los coeficientes solo afectan ventas futuras).
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Coeficientes actualizados correctamente",
+  "data": [
+    { "canal_venta": "Minorista", "coeficiente": 1.45 },
+    { "canal_venta": "Mayorista", "coeficiente": 1.20 },
+    { "canal_venta": "MercadoLibre", "coeficiente": 1.35 },
+    { "canal_venta": "Agencia", "coeficiente": 1.10 },
+    { "canal_venta": "Efectivo", "coeficiente": 1.05 },
+    { "canal_venta": "Taller", "coeficiente": 1.25 }
+  ]
+}
+```
+
+---
+
+### 1.5.3 Precio Sugerido — Lógica de cálculo (NO es endpoint, es lógica compartida)
+
+> **Nota:** Esta lógica se usa tanto en el frontend (para mostrar sugerencia) como en el backend (para validar).
+
+```
+precio_sugerido_ars = precio_usd_lista × cotización_dolar × coeficiente_canal
+```
+
+**Ejemplo:**
+- `precio_usd_lista` = 48.00 USD (del producto)
+- `cotización_dolar` = 1400.00 (Blue)
+- `coeficiente_canal` = 1.40 (Minorista)
+- `precio_sugerido_ars` = 48.00 × 1400 × 1.40 = **94,080.00 ARS**
+
+El usuario puede modificar el precio manualmente. El coeficiente NO se guarda en `detalle_venta` — solo sirve como sugerencia al momento de crear la venta.
+
+---
+
 ## 2. Pantalla: VENTAS
 
 ### 2.0 Ciclo de vida — Transiciones de Estado
@@ -494,7 +563,6 @@ WHERE i.codigo_producto = :codigo_producto;
       "tipo_dolar": "Blue",
       "descuento_porcentaje": 5.0,
       "descuento_monto": 0,
-      "coeficiente_aplicado": 1.00,
       "alicuota_iva": 21.0
     }
   ],
@@ -573,25 +641,48 @@ WHERE i.codigo_producto = :codigo_producto;
 }
 ```
 
-**Input Payload (→ PENDIENTE_RECIBO_MERCADERIA):**
+**Input Payload (→ Preparar Pedido desde NOTA_DE_PEDIDO — split inventario/proveedor por ítem):**
+
+> **Nota:** Este payload unifica las antiguas transiciones a `PENDIENTE_RECIBO_MERCADERIA` y `PENDIENTE_ENTREGA_CLIENTE` desde `NOTA_DE_PEDIDO`. El usuario decide **por ítem** cuántas unidades tomar del inventario y cuántas pedir al proveedor. El backend **determina automáticamente** el estado resultante:
+> - Si TODOS los ítems tienen `cantidad_pedir = 0` → `PENDIENTE_ENTREGA_CLIENTE`
+> - Si ALGÚN ítem tiene `cantidad_pedir > 0` → `PENDIENTE_RECIBO_MERCADERIA`
+
 ```json
 {
-  "nuevo_estado": "PENDIENTE_RECIBO_MERCADERIA",
-  "observaciones": "Faltan filtros del proveedor",
-  "items_pendientes": [
+  "observaciones": "5 filtros del stock, 15 se piden a Bosch. Bujías todas al proveedor.",
+  "items_disposicion": [
     {
       "id_detalle_venta": 1002,
       "codigo_producto": "REP-8834",
-      "cantidad_pendiente": 10,
+      "cantidad_inventario": 5,
+      "cantidad_pedir": 15,
       "id_solicitud_compra": 89
     },
     {
       "id_detalle_venta": 1003,
-      "codigo_producto": "REP-9999",
-      "cantidad_pendiente": 5,
+      "codigo_producto": "REP-5501",
+      "cantidad_inventario": 0,
+      "cantidad_pedir": 10,
       "pendiente_asignacion": true
+    },
+    {
+      "id_detalle_venta": 1004,
+      "codigo_producto": "REP-9999",
+      "cantidad_inventario": 2,
+      "cantidad_pedir": 0
     }
-  ]
+  ],
+  "items_precios": []
+}
+```
+
+> **Validaciones:** Para cada ítem, `cantidad_inventario + cantidad_pedir` debe ser igual a `cantidad` (del `detalle_venta`). `cantidad_inventario` no puede superar `inventario.cantidad_disponible`.
+
+**Input Payload (→ PENDIENTE_ENTREGA_CLIENTE desde PENDIENTE_RECIBO_MERCADERIA — mercadería recibida):**
+```json
+{
+  "nuevo_estado": "PENDIENTE_ENTREGA_CLIENTE",
+  "observaciones": "Mercadería del proveedor recibida"
 }
 ```
 
@@ -606,7 +697,6 @@ WHERE i.codigo_producto = :codigo_producto;
       "precio_ars": 67200.00,
       "tipo_dolar": "Blue",
       "descuento_porcentaje": 0,
-      "coeficiente_aplicado": 1.00,
       "alicuota_iva": 21.0
     }
   ]
@@ -638,8 +728,12 @@ WHERE i.codigo_producto = :codigo_producto;
 
 1. **Validar** que la transición sea válida según la tabla de transiciones (2.0).
 2. **`→ NOTA_DE_PEDIDO`**: Solo cambiar estado. Sin efecto en stock.
-3. **`→ PENDIENTE_RECIBO_MERCADERIA`**: Insertar registros en `venta_solicitud_compra` por cada ítem pendiente. Si tiene `id_solicitud_compra`, vincular. Si tiene `pendiente_asignacion = true`, dejar en cola.
-4. **`→ PENDIENTE_ENTREGA_CLIENTE`**: Reservar stock → `UPDATE inventario SET cantidad_disponible = cantidad_disponible - :cantidad WHERE codigo_producto = :codigo_producto`. Si `precios_congelados = FALSE`, procesar `items_precios` (buscar cotización, calcular USD, actualizar `detalle_venta` y `monto_total_venta`).
+3. **`→ Preparar Pedido` (desde NOTA_DE_PEDIDO, con `items_disposicion`):**
+   - Para cada ítem con `cantidad_inventario > 0`: reservar stock → `UPDATE inventario SET cantidad_disponible = cantidad_disponible - :cantidad_inventario WHERE codigo_producto = :codigo_producto`. Validar que `cantidad_disponible >= cantidad_inventario`.
+   - Para cada ítem con `cantidad_pedir > 0`: insertar en `venta_solicitud_compra`. Si tiene `id_solicitud_compra`, vincular. Si tiene `pendiente_asignacion = true`, dejar en cola.
+   - Si `precios_congelados = FALSE` y hay `items_precios`: procesar precios (buscar cotización, calcular USD, actualizar `detalle_venta` y `monto_total_venta`).
+   - **Determinar estado automáticamente:** Si algún ítem tiene `cantidad_pedir > 0` → `PENDIENTE_RECIBO_MERCADERIA`. Si todos tienen `cantidad_pedir = 0` → `PENDIENTE_ENTREGA_CLIENTE`.
+4. **`→ PENDIENTE_ENTREGA_CLIENTE` (desde PENDIENTE_RECIBO_MERCADERIA)**: La mercadería del proveedor ya llegó. Reservar stock de los ítems que estaban pendientes (los que ya tenían stock reservado no se tocan). Si `precios_congelados = FALSE`, procesar `items_precios`.
 5. **`→ ENTREGADO_PARCIAL`**: Para cada ítem en `items_entregados`: `UPDATE detalle_venta SET estado_item = 'ENTREGADO', cantidad_entregada = cantidad_entregada + :cantidad_entregada WHERE id_detalle_venta = :id`. Validar que `cantidad_entregada` no supere `cantidad`. Generar remito de venta con las líneas entregadas.
 6. **`→ ENTREGADO_TOTAL`**: Igual que ENTREGADO_PARCIAL, pero validar que TODOS los ítems no-ANULADO queden con `cantidad_entregada = cantidad`. Marcar todos como `estado_item = 'ENTREGADO'`.
 7. **`→ COMPLETADO`**: Sin efecto de stock. Transición manual para ventas que no requieren facturación. Validar que la venta esté en `ENTREGADO_PARCIAL` o `ENTREGADO_TOTAL`.
@@ -679,7 +773,6 @@ WHERE i.codigo_producto = :codigo_producto;
       "cantidad": 3,
       "precio_ars": 67200.00,
       "tipo_dolar": "Blue",
-      "coeficiente_aplicado": 1.00,
       "alicuota_iva": 21.0
     }
   ]
@@ -730,13 +823,16 @@ WHERE i.codigo_producto = :codigo_producto;
 **Lógica backend (en una transacción):**
 1. Validar que `estado_venta = 'COMPLETADO'` y que no exista ya una devolución para esta venta.
 2. Validar que `cantidad_devuelta <= cantidad` para cada ítem.
-3. Insertar en `devoluciones` y `detalle_devolucion`.
+3. Insertar en `devoluciones` y `detalle_devolucion`. Para cada línea de devolución:
+   - Copiar `alicuota_iva` del `detalle_venta` original.
+   - Calcular `monto_iva = precio_unitario * cantidad_devuelta * alicuota_iva / 100`.
+   - `monto_subtotal = precio_unitario * cantidad_devuelta`.
 4. **Reingresar stock**: `UPDATE inventario SET cantidad_disponible = cantidad_disponible + :cantidad_devuelta WHERE codigo_producto = :codigo_producto`.
 5. Registrar movimientos en `movimientos_inventario` tipo `ENTRADA` con `id_devolucion`.
 6. Determinar tipo de devolución:
    - Si TODAS las cantidades devueltas == cantidades originales → `estado_venta = 'DEVOLUCION'`, `monto_total_devolucion = monto_total_venta`.
    - Si NO → `estado_venta = 'DEVOLUCION_PARCIAL'`, `monto_total_devolucion = SUM(cantidad_devuelta * precio_unitario)`.
-7. **Generar Nota de Crédito automática**: `INSERT INTO facturas_venta` con `tipo_comprobante = 'NOTA_CREDITO'`, `id_factura_referencia = factura original`, monto = `monto_total_devolucion`.
+7. **Generar Nota de Crédito automática**: `INSERT INTO facturas_venta` con `tipo_comprobante = 'NOTA_CREDITO'`, `id_factura_referencia = factura original`, monto = `monto_total_devolucion`. Los ítems de `detalle_factura_venta` deben llevar su `alicuota_iva` y `monto_iva` correspondiente.
 8. Vincular la nota de crédito en `devoluciones.id_factura_nota_credito`.
 9. Registrar reversión del cobro (movimiento negativo en cuenta corriente del cliente).
 
@@ -1029,6 +1125,7 @@ totalmente_facturada = NOT EXISTS(SELECT 1 FROM detalle_venta
         "precio_final": 63840.00,
         "margen": 15840.00,
         "margen_porcentaje": 33.0,
+        "alicuota_iva": 21.0,
         "monto_iva": 28224.00,
         "monto_total_linea": 162624.00,
         "tipo_dolar": "Blue",
@@ -2009,10 +2106,13 @@ WHERE dfc.id_solicitud_compra = :id_solicitud_compra;
 
 **Lógica backend (en una transacción):**
 1. Validar que `cantidad_devuelta <= cantidad_aceptada` para cada ítem del remito referenciado.
-2. Insertar en `devoluciones_compra` y `detalle_devolucion_compra`.
+2. Insertar en `devoluciones_compra` y `detalle_devolucion_compra`. Para cada línea:
+   - Obtener `alicuota_iva` de `detalle_factura_compra` correspondiente (o usar 21.0 por defecto).
+   - Calcular `monto_iva = precio_unitario * cantidad_devuelta * alicuota_iva / 100`.
+   - `monto_subtotal = precio_unitario * cantidad_devuelta`.
 3. **Reducir stock**: `UPDATE inventario SET cantidad_disponible = cantidad_disponible - :cantidad_devuelta WHERE codigo_producto = :codigo_producto`.
 4. Registrar movimiento en `movimientos_inventario` tipo `SALIDA` con `id_devolucion_compra`.
-5. **Generar nota de crédito automática**: `INSERT INTO facturas_compra` con `tipo_comprobante = 'NOTA_CREDITO'`, monto = suma de `cantidad_devuelta * precio_unitario` de la factura asociada.
+5. **Generar nota de crédito automática**: `INSERT INTO facturas_compra` con `tipo_comprobante = 'NOTA_CREDITO'`, monto = suma de `cantidad_devuelta * precio_unitario` de la factura asociada. Los ítems de `detalle_factura_compra` deben llevar su `alicuota_iva` y `monto_iva` correspondiente.
 6. Vincular la nota de crédito en `devoluciones_compra.id_factura_nota_credito`.
 
 **Response (201 Created):**
@@ -2256,6 +2356,7 @@ WHERE dfc.id_solicitud_compra = :id_solicitud_compra;
       "descripcion_item": "Filtro de Aceite sintético reforzado V2",
       "cantidad": 2,
       "precio_unitario_sin_iva": 67200.00,
+      "alicuota_iva": 21.0,
       "monto_iva": 28224.00,
       "monto_total_linea": 162624.00
     }
@@ -2573,6 +2674,193 @@ WHERE dfc.id_solicitud_compra = :id_solicitud_compra;
       "saldo_cuenta_corriente": -450000.00
     }
   ]
+}
+```
+
+---
+
+### 6.5 Listas de Precio de un Proveedor — `GET /api/v1/proveedores/{id_proveedor}/listas-precio`
+
+Devuelve todas las listas de precio cargadas para un proveedor, ordenadas por fecha descendente.
+
+**Query Params:** `?page=1&limit=20`
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "pagination": { "total_items": 8, "page": 1, "limit": 20, "total_pages": 1 },
+  "data": [
+    {
+      "id_lista_precio": 34,
+      "fecha_lista": "2026-09-01",
+      "fecha_carga": "2026-09-02T14:30:00",
+      "nombre_archivo": "lista_bosch_sep2026.xlsx",
+      "tipo_archivo": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "cantidad_items": 145,
+      "observaciones": "Lista actualizada septiembre"
+    }
+  ]
+}
+```
+
+---
+
+### 6.6 Detalle de Lista de Precio — `GET /api/v1/proveedores/{id_proveedor}/listas-precio/{id_lista_precio}`
+
+Devuelve la cabecera y todos los ítems de una lista de precios.
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": {
+    "id_lista_precio": 34,
+    "id_proveedor": 1,
+    "proveedor_nombre": "Bosch Argentina S.A.U.",
+    "fecha_lista": "2026-09-01",
+    "fecha_carga": "2026-09-02T14:30:00",
+    "nombre_archivo": "lista_bosch_sep2026.xlsx",
+    "cantidad_items": 145,
+    "observaciones": "Lista actualizada septiembre",
+    "items": [
+      {
+        "id_detalle_lista": 1001,
+        "codigo_producto": "REP-8834",
+        "descripcion": "Filtro de Aceite sintético reforzado V2",
+        "precio": 48.00,
+        "moneda": "USD",
+        "aplicacion": "Honda CG 150 / XR 150"
+      }
+    ]
+  }
+}
+```
+
+---
+
+### 6.7 Cargar Lista de Precio (Upload + Parseo) — `POST /api/v1/proveedores/{id_proveedor}/listas-precio`
+
+**Flujo:**
+1. El frontend envía el archivo como base64 junto con la fecha de la lista.
+2. El backend parsea el archivo (Excel, CSV, PDF o imagen vía OCR).
+3. El backend devuelve los ítems parseados para revisión del usuario (NO se persisten aún).
+4. Si hay productos con `codigo_producto` que no existen en la tabla `productos`, se marcan como `nuevo: true` para que el frontend muestre un aviso.
+5. El frontend muestra la tabla con los ítems parseados para que el usuario revise, edite o elimine antes de confirmar.
+
+**Input Payload:**
+```json
+{
+  "fecha_lista": "2026-09-01",
+  "archivo_base64": "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,UEsDBBQ...",
+  "nombre_archivo": "lista_bosch_sep2026.xlsx",
+  "tipo_archivo": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "observaciones": "Lista actualizada septiembre"
+}
+```
+
+**Response — Ítems Parseados (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Archivo parseado exitosamente. Revisá los ítems antes de confirmar.",
+  "data": {
+    "id_lista_preliminar": "tmp-abc123",
+    "cantidad_items": 145,
+    "items": [
+      {
+        "codigo_producto": "REP-8834",
+        "descripcion": "Filtro de Aceite sintético reforzado V2",
+        "precio": 48.00,
+        "moneda": "USD",
+        "aplicacion": "Honda CG 150 / XR 150",
+        "nuevo": false,
+        "precio_anterior": 45.00,
+        "variacion_porcentaje": 6.67
+      },
+      {
+        "codigo_producto": "REP-NEW-001",
+        "descripcion": "Filtro aire nuevo modelo",
+        "precio": 22.50,
+        "moneda": "USD",
+        "aplicacion": "Honda CB 250",
+        "nuevo": true,
+        "precio_anterior": null,
+        "variacion_porcentaje": null
+      }
+    ]
+  }
+}
+```
+
+**Errores posibles:**
+- `ARCHIVO_INVALIDO`: formato no soportado o corrupto.
+- `PARSEO_FALLIDO`: no se pudieron extraer datos del archivo.
+
+---
+
+### 6.8 Confirmar Lista de Precio — `POST /api/v1/proveedores/{id_proveedor}/listas-precio/confirmar`
+
+**Lógica de negocio (backend):**
+1. Persistir la cabecera en `listas_precio`.
+2. Persistir cada ítem en `detalle_lista_precio`.
+3. Para cada ítem:
+   a. Si `codigo_producto` ya existe en `productos`:
+      - Cerrar registro vigente en `historico_precios`: `UPDATE SET fecha_hasta = NOW() WHERE codigo_producto = ? AND fecha_hasta IS NULL`.
+      - Insertar nuevo registro en `historico_precios` con `origen_cambio = 'LISTA_PRECIO'`.
+      - `UPDATE productos SET precio_usd_lista = :precio WHERE codigo_producto = :codigo_producto` (si moneda es USD).
+      - Si moneda es ARS: convertir a USD usando cotización del día del `tipo_dolar` indicado y actualizar `precio_usd_lista`, `tipo_dolar`, `tipo_cambio_conversion`.
+   b. Si `codigo_producto` NO existe y fue marcado como `nuevo`:
+      - Crear el producto en `productos` con la descripción y aplicación del ítem.
+      - Crear registro en `inventario` con `cantidad_disponible = 0`.
+      - Crear registro en `historico_precios`.
+
+**Input Payload:**
+```json
+{
+  "id_lista_preliminar": "tmp-abc123",
+  "fecha_lista": "2026-09-01",
+  "nombre_archivo": "lista_bosch_sep2026.xlsx",
+  "tipo_archivo": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "observaciones": "Lista actualizada septiembre",
+  "items": [
+    {
+      "codigo_producto": "REP-8834",
+      "descripcion": "Filtro de Aceite sintético reforzado V2",
+      "precio": 48.00,
+      "moneda": "USD",
+      "aplicacion": "Honda CG 150 / XR 150"
+    }
+  ]
+}
+```
+
+**Response (201 Created):**
+```json
+{
+  "status": "success",
+  "message": "Lista de precios cargada exitosamente. 145 productos actualizados.",
+  "data": {
+    "id_lista_precio": 34,
+    "fecha_lista": "2026-09-01",
+    "cantidad_items": 145,
+    "productos_actualizados": 140,
+    "productos_nuevos_creados": 5
+  }
+}
+```
+
+---
+
+### 6.9 Eliminar Lista de Precio — `DELETE /api/v1/proveedores/{id_proveedor}/listas-precio/{id_lista_precio}`
+
+Elimina una lista de precios y sus ítems. **No revierte los precios** de los productos actualizados (se mantiene el último precio vigente).
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Lista de precios eliminada"
 }
 ```
 
@@ -2933,3 +3221,558 @@ Todos los endpoints devuelven errores de negocio con el siguiente formato:
 | `ESTADO_NO_PERMITE_EDICION` | Se intentó editar una venta/compra en un estado que no permite edición. |
 | `DEVOLUCION_YA_EXISTE` | Se intentó crear una devolución para una venta que ya tiene una. |
 | `FACTURA_SIN_ITEMS` | Se intentó crear una factura sin ítems. |
+
+---
+
+### 10.4 Tratamiento de IVA
+
+El sistema soporta múltiples alícuotas de IVA para poder generar libros IVA Ventas e IVA Compras correctos.
+
+**Campo `alicuota_iva`:**
+- Tipo: `DECIMAL(5,2)`, default `21.00`.
+- Presente en: `detalle_venta`, `detalle_factura_venta`, `detalle_factura_compra`, `detalle_devolucion`, `detalle_devolucion_compra`.
+- Valores válidos: `0.00` (exento), `10.50`, `21.00`, `27.00`.
+
+**Reglas de cálculo:**
+| Operación | Fórmula |
+|---|---|
+| Monto IVA por línea | `monto_iva = (precio_unitario * cantidad - descuento) * alicuota_iva / 100` |
+| Total línea | `monto_total_linea = subtotal_sin_iva + monto_iva` |
+| IVA cabecera factura | `monto_iva = SUM(monto_iva)` de todos los ítems |
+
+**Al crear ventas/compras:**
+- Si el frontend no envía `alicuota_iva`, el backend usa `21.00` por defecto.
+- El frontend puede enviar `alicuota_iva` por ítem si el producto tiene una alícuota diferente (ej: 10.5% para ciertos repuestos).
+
+**Al generar notas de crédito (devoluciones):**
+- Copiar `alicuota_iva` del documento original (factura o detalle de venta).
+- Recalcular `monto_iva` con la cantidad devuelta.
+- Esto garantiza que el crédito fiscal revierte exactamente el débito fiscal original.
+
+**Para Libro IVA:**
+```sql
+-- Libro IVA Ventas (agrupado por alícuota)
+SELECT
+  fv.tipo_letra,
+  fv.numero_comprobante,
+  fv.fecha_emision,
+  dfv.alicuota_iva,
+  SUM(dfv.precio_unitario_sin_iva * dfv.cantidad) AS neto_gravado,
+  SUM(dfv.monto_iva) AS iva,
+  SUM(dfv.monto_total_linea) AS total
+FROM facturas_venta fv
+JOIN detalle_factura_venta dfv ON dfv.id_factura_venta = fv.id_factura_venta
+WHERE fv.fecha_emision BETWEEN :desde AND :hasta
+GROUP BY fv.id_factura_venta, dfv.alicuota_iva;
+
+-- Libro IVA Compras (agrupado por alícuota)
+SELECT
+  fc.tipo_letra,
+  fc.codigo_factura_arca,
+  fc.fecha_emision,
+  dfc.alicuota_iva,
+  SUM(dfc.precio_unitario * dfc.cantidad) AS neto_gravado,
+  SUM(dfc.monto_iva) AS iva,
+  SUM(dfc.monto_subtotal + dfc.monto_iva) AS total
+FROM facturas_compra fc
+JOIN detalle_factura_compra dfc ON dfc.id_factura_compra = fc.id_factura_compra
+WHERE fc.fecha_emision BETWEEN :desde AND :hasta
+GROUP BY fc.id_factura_compra, dfc.alicuota_iva;
+```
+
+---
+
+## 9. Integración: MERCADOLIBRE
+
+> **Nota general:** MiGarage se integra con la API oficial de MercadoLibre (MELI). El backend actúa como proxy: el frontend nunca llama a la API de ML directamente. Todos los tokens OAuth se almacenan en `ml_credenciales` y el backend los refresca automáticamente.
+
+### 9.0 Autenticación OAuth
+
+> **Nota:** MercadoLibre usa OAuth 2.0. El flujo es: frontend redirige al usuario a ML → ML redirige de vuelta con un `code` → backend intercambia por tokens.
+
+### 9.0.1 Obtener URL de autorización — `GET /api/v1/ml/auth/url`
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": {
+    "auth_url": "https://auth.mercadolibre.com.ar/authorization?response_type=code&client_id=APP_ID&redirect_uri=https://tudominio.com/api/v1/ml/auth/callback",
+    "vinculada": false
+  }
+}
+```
+
+> Si `vinculada = true`, ya hay una cuenta ML activa. El frontend puede mostrar "Cuenta vinculada: nickname" con opción de desvincular.
+
+---
+
+### 9.0.2 Callback OAuth — `GET /api/v1/ml/auth/callback?code=TG-xxx`
+
+**Lógica backend:**
+1. `POST https://api.mercadolibre.com/oauth/token` con `grant_type=authorization_code`, `code`, `client_id`, `client_secret`, `redirect_uri`.
+2. Guardar `access_token`, `refresh_token`, `expires_at` en `ml_credenciales`.
+3. `GET https://api.mercadolibre.com/users/me` para obtener `ml_user_id` y `ml_nickname`.
+4. Redirigir al frontend a `/mercadolibre?vinculado=ok`.
+
+> **Refresh automático:** Antes de cada llamada a la API de ML, verificar si `expires_at < NOW()`. Si expiró, `POST /oauth/token` con `grant_type=refresh_token`. Actualizar tokens en DB.
+
+---
+
+### 9.0.3 Estado de vinculación — `GET /api/v1/ml/auth/status`
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": {
+    "vinculada": true,
+    "ml_user_id": "123456789",
+    "ml_nickname": "MIGARAGE_AUTOPARTES",
+    "token_valido": true,
+    "expires_at": "2026-09-14T18:00:00Z"
+  }
+}
+```
+
+---
+
+### 9.0.4 Desvincular cuenta — `DELETE /api/v1/ml/auth`
+
+**Lógica backend:**
+1. Eliminar registro de `ml_credenciales`.
+2. No afecta publicaciones existentes en ML (quedan activas en ML pero sin sync).
+
+---
+
+### 9.1 Publicaciones
+
+### 9.1.1 Listar publicaciones — `GET /api/v1/ml/publicaciones`
+
+**Query Params:** `?page=1&limit=10&estado=active&busqueda=filtro`
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "pagination": { "total_items": 24, "page": 1, "limit": 10, "total_pages": 3 },
+  "data": [
+    {
+      "id_publicacion": 1,
+      "codigo_producto": "REP-8834",
+      "descripcion_producto": "Filtro de Aceite sintético reforzado V2",
+      "ml_item_id": "MLA1234567890",
+      "titulo": "Filtro Aceite Sintetico Bosch - Motor 2.0 TDI",
+      "precio": 94080.00,
+      "moneda": "ARS",
+      "estado_ml": "active",
+      "tipo_publicacion": "gold_special",
+      "condicion": "new",
+      "cantidad_disponible": 45,
+      "stock_local": 45,
+      "stock_sincronizado": true,
+      "ml_permalink": "https://articulo.mercadolibre.com.ar/MLA-1234567890",
+      "ml_thumbnail": "https://http2.mlstatic.com/D_NQ_NP_...",
+      "sincronizado_at": "2026-09-14T10:00:00Z"
+    }
+  ]
+}
+```
+
+**Lógica backend:**
+1. JOIN `ml_publicaciones` con `productos` e `inventario`.
+2. `stock_sincronizado = (ml_publicaciones.cantidad_disponible = inventario.cantidad_disponible)`.
+3. Si `stock_sincronizado = false`, el frontend muestra badge "Desincronizado".
+
+---
+
+### 9.1.2 Crear publicación — `POST /api/v1/ml/publicaciones`
+
+**Input Payload:**
+```json
+{
+  "codigo_producto": "REP-8834",
+  "titulo": "Filtro Aceite Sintetico Bosch - Motor 2.0 TDI",
+  "precio": 94080.00,
+  "moneda": "ARS",
+  "tipo_publicacion": "gold_special",
+  "condicion": "new",
+  "cantidad_disponible": 45,
+  "categoria_ml": "MLA1071",
+  "descripcion_ml": "Filtro de aceite sintético reforzado V2. Compatible con motores 2.0 Turbo Diesel 2020+.",
+  "imagenes": ["https://url-imagen-1.jpg", "https://url-imagen-2.jpg"]
+}
+```
+
+**Lógica backend:**
+1. Validar que el producto exista y esté activo.
+2. Validar que no exista ya una publicación activa para este producto.
+3. `POST https://api.mercadolibre.com/items` con el payload mapeado al formato MELI.
+4. Guardar `ml_item_id`, `ml_permalink`, `ml_thumbnail` de la respuesta de ML.
+5. Insertar en `ml_publicaciones`.
+
+**Response (201 Created):**
+```json
+{
+  "status": "success",
+  "message": "Publicación creada en MercadoLibre",
+  "data": {
+    "id_publicacion": 5,
+    "ml_item_id": "MLA1234567895",
+    "ml_permalink": "https://articulo.mercadolibre.com.ar/MLA-1234567895",
+    "estado_ml": "under_review"
+  }
+}
+```
+
+---
+
+### 9.1.3 Editar publicación — `PUT /api/v1/ml/publicaciones/{id_publicacion}`
+
+**Input Payload:**
+```json
+{
+  "titulo": "Filtro Aceite Sintetico Bosch V2 - Motor 2.0 TDI 2020+",
+  "precio": 98000.00,
+  "cantidad_disponible": 40
+}
+```
+
+**Lógica backend:**
+1. Actualizar en `ml_publicaciones`.
+2. `PUT https://api.mercadolibre.com/items/{ml_item_id}` con los campos modificados.
+3. Actualizar `sincronizado_at`.
+
+---
+
+### 9.1.4 Pausar publicación — `PUT /api/v1/ml/publicaciones/{id_publicacion}/pausar`
+
+**Lógica backend:**
+1. `PUT https://api.mercadolibre.com/items/{ml_item_id}` con `{ "status": "paused" }`.
+2. Actualizar `estado_ml = 'paused'` en `ml_publicaciones`.
+
+---
+
+### 9.1.5 Activar publicación — `PUT /api/v1/ml/publicaciones/{id_publicacion}/activar`
+
+**Lógica backend:**
+1. `PUT https://api.mercadolibre.com/items/{ml_item_id}` con `{ "status": "active" }`.
+2. Sincronizar stock actual de inventario antes de activar.
+3. Actualizar `estado_ml = 'active'` en `ml_publicaciones`.
+
+---
+
+### 9.1.6 Cerrar publicación — `DELETE /api/v1/ml/publicaciones/{id_publicacion}`
+
+**Lógica backend:**
+1. `PUT https://api.mercadolibre.com/items/{ml_item_id}` con `{ "status": "closed" }`.
+2. Actualizar `estado_ml = 'closed'` en `ml_publicaciones`.
+
+> **Nota:** No se borra de la DB local, solo se cierra en ML.
+
+---
+
+### 9.1.7 Sincronizar stock — `POST /api/v1/ml/publicaciones/sync`
+
+> **Nota:** Fuerza sincronización de stock de todas las publicaciones activas con el inventario local.
+
+**Lógica backend:**
+1. Para cada publicación con `estado_ml = 'active'`:
+   - Obtener `cantidad_disponible` de `inventario` para el `codigo_producto`.
+   - Si difiere de `ml_publicaciones.cantidad_disponible`:
+     - `PUT https://api.mercadolibre.com/items/{ml_item_id}` con `{ "available_quantity": nuevo_stock }`.
+     - Actualizar `ml_publicaciones.cantidad_disponible` y `sincronizado_at`.
+   - Si stock = 0: pausar automáticamente.
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Sincronización completada",
+  "data": {
+    "publicaciones_actualizadas": 3,
+    "publicaciones_pausadas_por_stock": 1,
+    "publicaciones_sin_cambios": 20
+  }
+}
+```
+
+> **Trigger automático:** Esta lógica también debe ejecutarse automáticamente cada vez que cambie el stock de un producto (remito de compra confirmado, venta despachada, devolución, ajuste manual). El backend busca si el producto tiene publicación activa y actualiza ML.
+
+---
+
+### 9.2 Órdenes / Ventas ML
+
+### 9.2.1 Webhook de órdenes — `POST /api/v1/ml/webhooks/orders`
+
+> **Nota:** ML envía una notificación cada vez que se crea o actualiza una orden. El endpoint debe responder 200 inmediatamente y procesar en background.
+
+**Input (de MercadoLibre):**
+```json
+{
+  "resource": "/orders/2000004381063858",
+  "user_id": 123456789,
+  "topic": "orders_v2",
+  "application_id": 1234567890,
+  "attempts": 1,
+  "sent": "2026-09-14T14:30:00.000Z",
+  "received": "2026-09-14T14:30:00.100Z"
+}
+```
+
+**Lógica backend (procesamiento asíncrono):**
+1. Responder `200 OK` inmediatamente.
+2. Extraer `order_id` de `resource`.
+3. `GET https://api.mercadolibre.com/orders/{order_id}` para obtener la orden completa.
+4. Si la orden ya existe en `ml_ordenes`, actualizar estado. Si no:
+   - Crear registro en `ml_ordenes`.
+   - Si `status = 'paid'`:
+     - Crear `venta` automática con `canal_venta_aplicado = 'MercadoLibre'`, `estado_venta = 'PENDIENTE_ENTREGA_CLIENTE'`, `precios_congelados = TRUE`.
+     - Para cada `order_item`: buscar en `ml_publicaciones` por `ml_item_id` → obtener `codigo_producto` → insertar `detalle_venta`.
+     - Reservar stock.
+     - Vincular `ml_ordenes.id_venta`.
+
+---
+
+### 9.2.2 Webhook de envíos — `POST /api/v1/ml/webhooks/shipments`
+
+**Lógica backend:**
+1. Responder `200 OK` inmediatamente.
+2. `GET https://api.mercadolibre.com/shipments/{shipment_id}` para obtener estado.
+3. Actualizar `ml_ordenes.estado_envio`.
+4. Si `status = 'delivered'`:
+   - Transicionar la venta vinculada a `ENTREGADO_TOTAL` → `COMPLETADO` si está totalmente facturada.
+
+---
+
+### 9.2.3 Listar órdenes ML — `GET /api/v1/ml/ordenes`
+
+**Query Params:** `?page=1&limit=10&estado=paid&fecha_desde=2026-09-01`
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "pagination": { "total_items": 48, "page": 1, "limit": 10, "total_pages": 5 },
+  "data": [
+    {
+      "id_orden_ml": 1,
+      "ml_order_id": 2000004381063858,
+      "fecha_orden": "2026-09-14T14:30:00Z",
+      "buyer_nickname": "COMPRADOR_123",
+      "buyer_nombre": "Juan Pérez",
+      "estado_orden": "paid",
+      "estado_envio": "shipped",
+      "monto_total": 94080.00,
+      "monto_comision_ml": 12230.40,
+      "monto_envio": 3500.00,
+      "id_venta": 510,
+      "items": [
+        {
+          "ml_item_id": "MLA1234567890",
+          "titulo": "Filtro Aceite Sintetico Bosch - Motor 2.0 TDI",
+          "cantidad": 1,
+          "precio_unitario": 94080.00,
+          "codigo_producto": "REP-8834"
+        }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### 9.2.4 Forzar sync de órdenes — `POST /api/v1/ml/ordenes/sync`
+
+**Lógica backend:**
+1. `GET https://api.mercadolibre.com/orders/search?seller={ml_user_id}&sort=date_desc&order.date_created.from={48hs_atras}`.
+2. Para cada orden: si no existe en `ml_ordenes`, procesarla como en 9.2.1.
+
+---
+
+### 9.3 Preguntas y Respuestas
+
+### 9.3.1 Listar preguntas — `GET /api/v1/ml/preguntas`
+
+**Query Params:** `?page=1&limit=20&estado=UNANSWERED&id_publicacion=3`
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id_pregunta_local": 1,
+      "ml_question_id": 9876543210,
+      "id_publicacion": 3,
+      "ml_item_id": "MLA1234567890",
+      "titulo_publicacion": "Filtro Aceite Sintetico Bosch",
+      "buyer_nickname": "COMPRADOR_456",
+      "texto_pregunta": "Hola, sirve para Hilux 2019 diesel?",
+      "texto_respuesta": null,
+      "estado": "UNANSWERED",
+      "fecha_pregunta": "2026-09-14T12:00:00Z"
+    }
+  ]
+}
+```
+
+---
+
+### 9.3.2 Responder pregunta — `POST /api/v1/ml/preguntas/{ml_question_id}/responder`
+
+**Input Payload:**
+```json
+{
+  "texto_respuesta": "Hola! Sí, es compatible con Toyota Hilux 2.8 TDI 2016+. Saludos!"
+}
+```
+
+**Lógica backend:**
+1. `POST https://api.mercadolibre.com/answers` con `{ "question_id": ml_question_id, "text": texto_respuesta }`.
+2. Actualizar `ml_preguntas.texto_respuesta`, `fecha_respuesta`, `estado = 'ANSWERED'`.
+
+---
+
+### 9.3.3 Sync preguntas — `POST /api/v1/ml/preguntas/sync`
+
+**Lógica backend:**
+1. Para cada publicación activa: `GET https://api.mercadolibre.com/questions/search?item={ml_item_id}&status=unanswered`.
+2. Insertar preguntas nuevas en `ml_preguntas`.
+
+---
+
+### 9.4 Monitor de Precios (Scraping)
+
+> **Nota:** El scraping usa la API pública de búsqueda de ML (no requiere autenticación). Se ejecuta una vez al día via cron job (6:00 AM). También se puede forzar manualmente.
+
+### 9.4.1 Listar configuraciones — `GET /api/v1/ml/scraping/config`
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": [
+    {
+      "id_config": 1,
+      "nombre": "Carburador CG 150cc",
+      "query_busqueda": "carburador cg 150 2022",
+      "categoria_ml": null,
+      "condicion": "new",
+      "activo": true,
+      "codigo_producto": "REP-4410",
+      "producto_descripcion": "Correa de distribución 2.0 TDI",
+      "ultimo_resultado": {
+        "fecha": "2026-09-14",
+        "precio_minimo": 18500.00,
+        "precio_maximo": 45000.00,
+        "precio_promedio": 28750.00,
+        "precio_mediana": 26900.00,
+        "total_publicaciones": 38
+      }
+    }
+  ]
+}
+```
+
+---
+
+### 9.4.2 Crear configuración — `POST /api/v1/ml/scraping/config`
+
+**Input Payload:**
+```json
+{
+  "nombre": "Carburador CG 150cc",
+  "query_busqueda": "carburador cg 150 2022",
+  "categoria_ml": null,
+  "condicion": "new",
+  "codigo_producto": "REP-4410"
+}
+```
+
+---
+
+### 9.4.3 Editar configuración — `PUT /api/v1/ml/scraping/config/{id_config}`
+
+---
+
+### 9.4.4 Eliminar configuración — `DELETE /api/v1/ml/scraping/config/{id_config}`
+
+---
+
+### 9.4.5 Historial de resultados — `GET /api/v1/ml/scraping/config/{id_config}/resultados`
+
+**Query Params:** `?desde=2026-08-01&hasta=2026-09-14`
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": {
+    "config": {
+      "id_config": 1,
+      "nombre": "Carburador CG 150cc",
+      "codigo_producto": "REP-4410",
+      "tu_precio_ars": 119000.00
+    },
+    "resultados": [
+      {
+        "fecha": "2026-09-14",
+        "total_publicaciones": 38,
+        "precio_minimo": 18500.00,
+        "precio_maximo": 45000.00,
+        "precio_promedio": 28750.00,
+        "precio_mediana": 26900.00,
+        "publicaciones_envio_gratis": 12,
+        "top_vendedor_precio": 27500.00
+      },
+      {
+        "fecha": "2026-09-13",
+        "total_publicaciones": 36,
+        "precio_minimo": 18200.00,
+        "precio_maximo": 44500.00,
+        "precio_promedio": 28200.00,
+        "precio_mediana": 26500.00,
+        "publicaciones_envio_gratis": 11,
+        "top_vendedor_precio": 27000.00
+      }
+    ]
+  }
+}
+```
+
+> **Nota:** Si `codigo_producto` está vinculado, `tu_precio_ars` se calcula como `producto.precio_usd_lista × cotización_dolar_blue`. Esto permite al frontend graficar una línea "Tu precio" junto con min/max/mediana del mercado.
+
+---
+
+### 9.4.6 Ejecutar scraping manual — `POST /api/v1/ml/scraping/ejecutar`
+
+**Input Payload (opcional):**
+```json
+{
+  "id_config": 1
+}
+```
+
+> Si no se envía `id_config`, ejecuta para TODAS las configuraciones activas.
+
+**Lógica backend (por cada config):**
+1. `GET https://api.mercadolibre.com/sites/MLA/search?q={query_busqueda}&category={categoria_ml}&condition={condicion}&sort=price_asc&limit=50`.
+2. Filtrar publicaciones `gold_special` y `gold_pro` (ignorar `free` y `bronze`).
+3. Calcular `precio_minimo`, `precio_maximo`, `precio_promedio`, `precio_mediana`.
+4. Contar `publicaciones_envio_gratis` (donde `shipping.free_shipping = true`).
+5. Identificar `top_vendedor_precio` (vendedor con mejor reputación, `seller.seller_reputation.level_id = '5_green'`).
+6. Guardar muestra de 10 publicaciones en `raw_sample` para referencia.
+7. `INSERT INTO ml_scraping_resultados` (o `UPDATE` si ya existe para hoy).
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Scraping ejecutado para 5 configuraciones",
+  "data": {
+    "configs_procesadas": 5,
+    "errores": 0
+  }
+}
