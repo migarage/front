@@ -19,6 +19,7 @@ export const SECTIONS = [
   { href: "/clientes", label: "Clientes", desc: "ABM de clientes y saldos de cuenta." },
   { href: "/analisis", label: "Análisis", desc: "Dashboard de KPIs, canales y márgenes." },
   { href: "/mercadolibre", label: "MercadoLibre", desc: "Publicaciones, ventas ML y monitor de precios." },
+  { href: "/contabilidad", label: "Contabilidad", desc: "Dashboard de compras, ventas e IVA por período." },
 ] as const;
 
 export const FOOTER_LINKS = [

@@ -17,6 +17,7 @@ const CREATE_FIELDS: FormField[] = [
   { name: "razon_social", label: "Razón Social", type: "text", required: true, span: 2 },
   { name: "cuit", label: "CUIT", type: "text", required: true, placeholder: "30-XXXXXXXX-X" },
   { name: "tipo_factura_habitual", label: "Tipo Factura", type: "select", required: true, options: ["A", "B", "C"] },
+  { name: "celular", label: "Celular", type: "text", placeholder: "+54 11 1234-5678" },
   { name: "direccion", label: "Dirección", type: "text", span: 2 },
   { name: "localidad", label: "Localidad", type: "text" },
   { name: "provincia", label: "Provincia", type: "select", options: ["Buenos Aires", "CABA", "Córdoba", "Santa Fe", "Mendoza", "Tucumán", "Entre Ríos", "Salta"] },
@@ -25,6 +26,7 @@ const CREATE_FIELDS: FormField[] = [
 
 const EDIT_FIELDS: FormField[] = [
   { name: "razon_social", label: "Razón Social", type: "text", span: 2 },
+  { name: "celular", label: "Celular", type: "text" },
   { name: "direccion", label: "Dirección", type: "text", span: 2 },
   { name: "localidad", label: "Localidad", type: "text" },
   { name: "codigo_postal", label: "Código Postal", type: "text" },

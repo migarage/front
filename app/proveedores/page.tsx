@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useRef, useEffect } from "react";
 import { formatARS, formatUSD, fmtDate } from "@/lib/format";
+import { useCotizaciones } from "@/contexts/CotizacionesContext";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -121,20 +122,38 @@ export default function ProveedoresPage() {
   const [records, setRecords] = useState<Proveedor[]>(MOCK_PROVEEDORES);
   const [listasDB, setListasDB] = useState<Record<number, ListaPrecioDetail[]>>(MOCK_LISTAS);
   const [search, setSearch] = useState("");
+  const [filterIva, setFilterIva] = useState("");
+  const [filterSaldo, setFilterSaldo] = useState("");
   const [page, setPage] = useState(1);
   const [modal, setModal] = useState<ModalState>(null);
   const [toast, setToast] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return records;
-    const q = search.toLowerCase();
-    return records.filter(
-      (r) =>
-        r.nombre_proveedor.toLowerCase().includes(q) ||
-        r.cuit.includes(q) ||
-        String(r.id_proveedor).includes(q),
-    );
-  }, [records, search]);
+    let result = records;
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      result = result.filter(
+        (r) =>
+          r.nombre_proveedor.toLowerCase().includes(q) ||
+          r.cuit.includes(q) ||
+          String(r.id_proveedor).includes(q),
+      );
+    }
+    if (filterIva) result = result.filter((r) => r.condicion_iva === filterIva);
+    if (filterSaldo) {
+      const f = filterSaldo.trim();
+      result = result.filter((r) => {
+        const v = r.saldo_cuenta_corriente;
+        if (f.startsWith(">=")) { const n = parseFloat(f.slice(2)); return !isNaN(n) && v >= n; }
+        if (f.startsWith("<=")) { const n = parseFloat(f.slice(2)); return !isNaN(n) && v <= n; }
+        if (f.startsWith(">")) { const n = parseFloat(f.slice(1)); return !isNaN(n) && v > n; }
+        if (f.startsWith("<")) { const n = parseFloat(f.slice(1)); return !isNaN(n) && v < n; }
+        const n = parseFloat(f);
+        return !isNaN(n) && v === n;
+      });
+    }
+    return result;
+  }, [records, search, filterIva, filterSaldo]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -191,6 +210,15 @@ export default function ProveedoresPage() {
             />
             <button
               type="button"
+              onClick={() => {
+                if (records.length > 0) setModal({ type: "upload_lista", proveedor: records[0] });
+              }}
+              className="h-10 border border-[#CC0000] px-5 text-sm font-semibold uppercase tracking-wide text-[#CC0000] hover:bg-red-50"
+            >
+              + Nueva Lista
+            </button>
+            <button
+              type="button"
               onClick={() => setModal({ type: "create" })}
               className="h-10 bg-[#CC0000] px-5 text-sm font-semibold uppercase tracking-wide text-white hover:bg-[#8B0000]"
             >
@@ -211,6 +239,26 @@ export default function ProveedoresPage() {
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Saldo CC</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-center text-xs font-semibold uppercase tracking-wide">Listas de Precio</th>
                 <th className="border-b border-honda-line px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide">Acciones</th>
+              </tr>
+              <tr className="bg-[#fafafa]">
+                <th className="border-b border-honda-line px-3 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1">
+                  <select value={filterIva} onChange={(e) => { setFilterIva(e.target.value); setPage(1); }} className="h-7 w-full border border-honda-line bg-white px-1 text-xs outline-none focus:border-[#CC0000]">
+                    <option value="">Todos</option>
+                    {CONDICIONES_IVA.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </th>
+                <th className="border-b border-honda-line px-3 py-1">
+                  <input value={filterSaldo} onChange={(e) => { setFilterSaldo(e.target.value); setPage(1); }} placeholder=">0, <0..." className="h-7 w-full border border-honda-line px-1 text-xs outline-none focus:border-[#CC0000]" title="Ej: <0 (deuda), >0, =0" />
+                </th>
+                <th className="border-b border-honda-line px-3 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1 text-right">
+                  {(filterIva || filterSaldo) && (
+                    <button type="button" onClick={() => { setFilterIva(""); setFilterSaldo(""); setPage(1); }} className="text-[10px] font-medium text-[#CC0000] hover:underline">Limpiar</button>
+                  )}
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -513,6 +561,7 @@ function UploadListaModal({
 }) {
   const [step, setStep] = useState<"upload" | "review">("upload");
   const [fechaLista, setFechaLista] = useState(new Date().toISOString().split("T")[0]);
+  const [tipoCambio, setTipoCambio] = useState("Blue");
   const [observaciones, setObservaciones] = useState("");
   const [fileName, setFileName] = useState("");
   const [fileType, setFileType] = useState("");
@@ -580,7 +629,7 @@ function UploadListaModal({
         <div className="p-6 sm:p-8">
           {step === "upload" && (
             <>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <label className="block">
                   <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Fecha de la Lista *</span>
                   <input
@@ -590,6 +639,12 @@ function UploadListaModal({
                     required
                     className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]"
                   />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Tipo de Cambio</span>
+                  <select value={tipoCambio} onChange={(e) => setTipoCambio(e.target.value)} className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]">
+                    {MONEDAS.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
                 </label>
                 <label className="block">
                   <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Observaciones</span>

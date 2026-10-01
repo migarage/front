@@ -266,18 +266,82 @@ export default function MercadoLibrePage() {
 /* ------------------------------------------------------------------ */
 
 function TabPublicaciones({ search, onAction, showToast }: { search: string; onAction: (m: ModalState) => void; showToast: (s: string) => void }) {
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [filterEstado, setFilterEstado] = useState("");
+  const [filterTipo, setFilterTipo] = useState("");
+  const [massAction, setMassAction] = useState("");
+  const [massValue, setMassValue] = useState("");
+  const [pubs, setPubs] = useState(MOCK_PUBLICACIONES);
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return MOCK_PUBLICACIONES.filter((p) =>
+    let result = pubs.filter((p) =>
       !q || p.titulo.toLowerCase().includes(q) || p.codigo_producto.toLowerCase().includes(q) || p.descripcion_producto.toLowerCase().includes(q),
     );
-  }, [search]);
+    if (filterEstado) result = result.filter((p) => p.estado_ml === filterEstado);
+    if (filterTipo) result = result.filter((p) => p.tipo_publicacion === filterTipo);
+    return result;
+  }, [search, pubs, filterEstado, filterTipo]);
+
+  const hasFilters = !!(filterEstado || filterTipo);
+
+  function applyMassAction() {
+    if (!massAction || selectedIds.size === 0) return;
+    if (massAction === "subir_pct" && massValue) {
+      const pct = parseFloat(massValue) / 100;
+      setPubs(pubs.map((p) => selectedIds.has(p.id_publicacion) ? { ...p, precio: Math.round(p.precio * (1 + pct)) } : p));
+      showToast(`Precio +${massValue}% aplicado a ${selectedIds.size} publicaciones`);
+    } else if (massAction === "subir_monto" && massValue) {
+      const monto = parseFloat(massValue) || 0;
+      setPubs(pubs.map((p) => selectedIds.has(p.id_publicacion) ? { ...p, precio: p.precio + monto } : p));
+      showToast(`Precio +$${monto} aplicado a ${selectedIds.size} publicaciones`);
+    } else if (massAction === "pausar") {
+      setPubs(pubs.map((p) => selectedIds.has(p.id_publicacion) ? { ...p, estado_ml: "paused" } : p));
+      showToast(`${selectedIds.size} publicaciones pausadas`);
+    } else if (massAction === "activar") {
+      setPubs(pubs.map((p) => selectedIds.has(p.id_publicacion) ? { ...p, estado_ml: "active" } : p));
+      showToast(`${selectedIds.size} publicaciones activadas`);
+    } else if (massAction === "eliminar") {
+      setPubs(pubs.filter((p) => !selectedIds.has(p.id_publicacion)));
+      showToast(`${selectedIds.size} publicaciones eliminadas`);
+    }
+    setSelectedIds(new Set());
+    setMassAction("");
+    setMassValue("");
+  }
 
   return (
-    <div className="overflow-x-auto">
+    <div>
+      {/* Mass actions bar */}
+      {selectedIds.size > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded bg-indigo-50 px-4 py-2 text-sm">
+          <span className="font-medium text-indigo-800">{selectedIds.size} seleccionada{selectedIds.size > 1 ? "s" : ""}</span>
+          <span className="text-indigo-300">|</span>
+          <select value={massAction} onChange={(e) => { setMassAction(e.target.value); setMassValue(""); }} className="h-8 border border-indigo-200 bg-white px-2 text-xs font-medium outline-none">
+            <option value="">Acción masiva...</option>
+            <option value="subir_pct">Subir precio %</option>
+            <option value="subir_monto">Subir precio $</option>
+            <option value="pausar">Pausar</option>
+            <option value="activar">Activar</option>
+            <option value="eliminar">Eliminar</option>
+          </select>
+          {(massAction === "subir_pct" || massAction === "subir_monto") && (
+            <input value={massValue} onChange={(e) => setMassValue(e.target.value)} type="number" step="0.01" placeholder={massAction === "subir_pct" ? "Ej: 10" : "Ej: 5000"} className="h-8 w-28 border border-indigo-200 bg-white px-2 text-xs outline-none" />
+          )}
+          {massAction && (
+            <button type="button" onClick={applyMassAction} className="h-8 rounded bg-indigo-600 px-4 text-xs font-semibold text-white hover:bg-indigo-700">Aplicar</button>
+          )}
+          <button type="button" onClick={() => setSelectedIds(new Set())} className="ml-auto text-xs text-indigo-600 hover:underline">Deseleccionar</button>
+        </div>
+      )}
+
+      <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-[#f6f6f6] text-left">
+            <th className="border-b border-honda-line px-2 py-3 text-center">
+              <input type="checkbox" checked={filtered.length > 0 && filtered.every((p) => selectedIds.has(p.id_publicacion))} onChange={() => { const all = filtered.every((p) => selectedIds.has(p.id_publicacion)); if (all) setSelectedIds(new Set()); else setSelectedIds(new Set(filtered.map((p) => p.id_publicacion))); }} className="h-3.5 w-3.5 accent-[#CC0000]" />
+            </th>
             <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Producto</th>
             <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Título ML</th>
             <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Precio</th>
@@ -287,10 +351,41 @@ function TabPublicaciones({ search, onAction, showToast }: { search: string; onA
             <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Tipo</th>
             <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide text-right">Acciones</th>
           </tr>
+          {/* Column filters */}
+          <tr className="bg-[#fafafa]">
+            <th className="border-b border-honda-line px-2 py-1"></th>
+            <th className="border-b border-honda-line px-3 py-1"></th>
+            <th className="border-b border-honda-line px-3 py-1"></th>
+            <th className="border-b border-honda-line px-3 py-1"></th>
+            <th className="border-b border-honda-line px-3 py-1"></th>
+            <th className="border-b border-honda-line px-3 py-1"></th>
+            <th className="border-b border-honda-line px-3 py-1">
+              <select value={filterEstado} onChange={(e) => setFilterEstado(e.target.value)} className="h-7 w-full border border-honda-line bg-white px-1 text-xs outline-none focus:border-[#CC0000]">
+                <option value="">Todos</option>
+                <option value="active">Active</option>
+                <option value="paused">Paused</option>
+                <option value="closed">Closed</option>
+                <option value="draft">Draft</option>
+              </select>
+            </th>
+            <th className="border-b border-honda-line px-3 py-1">
+              <select value={filterTipo} onChange={(e) => setFilterTipo(e.target.value)} className="h-7 w-full border border-honda-line bg-white px-1 text-xs outline-none focus:border-[#CC0000]">
+                <option value="">Todos</option>
+                <option value="gold_special">Clásica</option>
+                <option value="gold_pro">Premium</option>
+              </select>
+            </th>
+            <th className="border-b border-honda-line px-3 py-1 text-right">
+              {hasFilters && <button type="button" onClick={() => { setFilterEstado(""); setFilterTipo(""); }} className="text-[10px] font-medium text-[#CC0000] hover:underline">Limpiar</button>}
+            </th>
+          </tr>
         </thead>
         <tbody>
           {filtered.map((pub) => (
             <tr key={pub.id_publicacion} className="border-b border-honda-line hover:bg-[#fafafa]">
+              <td className="px-2 py-3 text-center">
+                <input type="checkbox" checked={selectedIds.has(pub.id_publicacion)} onChange={() => { setSelectedIds((prev) => { const n = new Set(prev); if (n.has(pub.id_publicacion)) n.delete(pub.id_publicacion); else n.add(pub.id_publicacion); return n; }); }} className="h-3.5 w-3.5 accent-[#CC0000]" />
+              </td>
               <td className="px-4 py-3">
                 <div className="text-xs font-mono text-honda-muted">{pub.codigo_producto}</div>
                 <div className="text-sm">{pub.descripcion_producto}</div>
@@ -337,10 +432,11 @@ function TabPublicaciones({ search, onAction, showToast }: { search: string; onA
             </tr>
           ))}
           {filtered.length === 0 && (
-            <tr><td colSpan={8} className="px-4 py-8 text-center text-sm text-honda-muted">Sin publicaciones</td></tr>
+            <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-honda-muted">Sin publicaciones</td></tr>
           )}
         </tbody>
       </table>
+    </div>
     </div>
   );
 }
@@ -350,18 +446,68 @@ function TabPublicaciones({ search, onAction, showToast }: { search: string; onA
 /* ------------------------------------------------------------------ */
 
 function TabVentasML({ search, onAction }: { search: string; onAction: (m: ModalState) => void }) {
+  const [periodo, setPeriodo] = useState("30");
+  const [fechaDesde, setFechaDesde] = useState("");
+  const [fechaHasta, setFechaHasta] = useState("");
+
+  const MOCK_COSTOS: Record<string, number> = {
+    "REP-8834": 48 * 1400,
+    "REP-1201": 32 * 1400,
+    "REP-9999": 125 * 1400,
+    "REP-5501": 8.5 * 1400,
+    "REP-3300": 65 * 1400,
+  };
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    return MOCK_ORDENES.filter((o) =>
+    let result = MOCK_ORDENES.filter((o) =>
       !q || o.buyer_nickname.toLowerCase().includes(q) || o.buyer_nombre.toLowerCase().includes(q) || String(o.ml_order_id).includes(q) || o.items.some((i) => i.titulo.toLowerCase().includes(q)),
     );
-  }, [search]);
+    if (periodo !== "custom") {
+      const days = parseInt(periodo);
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - days);
+      const cutoffStr = cutoff.toISOString();
+      result = result.filter((o) => o.fecha_orden >= cutoffStr);
+    } else {
+      if (fechaDesde) result = result.filter((o) => o.fecha_orden >= fechaDesde);
+      if (fechaHasta) result = result.filter((o) => o.fecha_orden <= fechaHasta + "T23:59:59Z");
+    }
+    return result;
+  }, [search, periodo, fechaDesde, fechaHasta]);
 
   const totalVentas = filtered.filter((o) => o.estado_orden === "paid").reduce((s, o) => s + o.monto_total, 0);
   const totalComisiones = filtered.filter((o) => o.estado_orden === "paid").reduce((s, o) => s + o.monto_comision_ml, 0);
 
+  function calcMargen(orden: MLOrden) {
+    const costo = orden.items.reduce((s, i) => s + (MOCK_COSTOS[i.codigo_producto] ?? 0) * i.cantidad, 0);
+    const neto = orden.monto_total - orden.monto_comision_ml;
+    const margenArs = neto - costo;
+    const margenPct = costo > 0 ? (margenArs / costo) * 100 : 0;
+    return { margenArs, margenPct };
+  }
+
   return (
     <div>
+      {/* Period selector */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <select value={periodo} onChange={(e) => setPeriodo(e.target.value)} className="h-9 border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]">
+          <option value="7">Últimos 7 días</option>
+          <option value="15">Últimos 15 días</option>
+          <option value="30">Últimos 30 días</option>
+          <option value="90">Últimos 90 días</option>
+          <option value="custom">Rango personalizado</option>
+        </select>
+        {periodo === "custom" && (
+          <>
+            <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className="h-9 border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]" />
+            <span className="text-xs text-honda-muted">a</span>
+            <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} className="h-9 border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]" />
+          </>
+        )}
+      </div>
+
+      {/* KPIs */}
       <div className="mb-4 flex gap-4">
         <div className="rounded border border-honda-line bg-[#fafafa] px-4 py-3">
           <div className="text-[10px] font-semibold uppercase tracking-wide text-honda-muted">Ventas totales</div>
@@ -387,6 +533,7 @@ function TabVentasML({ search, onAction }: { search: string; onAction: (m: Modal
               <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Producto</th>
               <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Monto</th>
               <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Comisión</th>
+              <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Margen</th>
               <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Pago</th>
               <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Envío</th>
               <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Venta</th>
@@ -404,6 +551,19 @@ function TabVentasML({ search, onAction }: { search: string; onAction: (m: Modal
                 <td className="px-4 py-3 max-w-[200px] truncate text-xs">{orden.items.map((i) => `${i.titulo} (x${i.cantidad})`).join(", ")}</td>
                 <td className="whitespace-nowrap px-4 py-3 font-semibold">{formatARS(orden.monto_total)}</td>
                 <td className="whitespace-nowrap px-4 py-3 text-xs text-red-600">-{formatARS(orden.monto_comision_ml)}</td>
+                <td className="whitespace-nowrap px-4 py-3">
+                  {(() => {
+                    if (orden.estado_orden === "cancelled") return <span className="text-xs text-honda-muted">—</span>;
+                    const { margenArs, margenPct } = calcMargen(orden);
+                    const color = margenArs >= 0 ? "text-green-700" : "text-red-600";
+                    return (
+                      <div className={`text-xs font-medium ${color}`}>
+                        <span>{margenPct >= 0 ? "+" : ""}{margenPct.toFixed(1)}%</span>
+                        <span className="ml-1 text-[10px] text-honda-muted">({formatARS(margenArs)})</span>
+                      </div>
+                    );
+                  })()}
+                </td>
                 <td className="px-4 py-3">
                   <span className={`inline-block rounded px-2 py-0.5 text-[10px] font-semibold ${ESTADO_ORDEN_COLORS[orden.estado_orden] ?? "bg-gray-100"}`}>
                     {orden.estado_orden}
@@ -424,7 +584,7 @@ function TabVentasML({ search, onAction }: { search: string; onAction: (m: Modal
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={9} className="px-4 py-8 text-center text-sm text-honda-muted">Sin órdenes</td></tr>
+              <tr><td colSpan={10} className="px-4 py-8 text-center text-sm text-honda-muted">Sin órdenes</td></tr>
             )}
           </tbody>
         </table>
@@ -503,10 +663,18 @@ function TabPreguntas({ search, onAction }: { search: string; onAction: (m: Moda
 /* ------------------------------------------------------------------ */
 
 function TabMonitorPrecios({ search, onAction }: { search: string; onAction: (m: ModalState) => void }) {
+  const MOCK_COSTOS: Record<string, number> = {
+    "REP-8834": 48 * 1400,
+    "REP-1201": 32 * 1400,
+    "REP-9999": 125 * 1400,
+    "REP-5501": 8.5 * 1400,
+    "REP-3300": 65 * 1400,
+  };
+
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return MOCK_SCRAPING_CONFIGS.filter((c) =>
-      !q || c.nombre.toLowerCase().includes(q) || c.query_busqueda.toLowerCase().includes(q),
+      !q || c.nombre.toLowerCase().includes(q) || c.query_busqueda.toLowerCase().includes(q) || (c.codigo_producto && c.codigo_producto.toLowerCase().includes(q)) || (c.producto_descripcion && c.producto_descripcion.toLowerCase().includes(q)),
     );
   }, [search]);
 
@@ -547,6 +715,15 @@ function TabMonitorPrecios({ search, onAction }: { search: string; onAction: (m:
                   <button onClick={() => onAction({ type: "historial_scraping", config })} className="text-xs text-[#CC0000] hover:underline">
                     Ver historial
                   </button>
+                  {config.codigo_producto && (
+                    <button onClick={() => {
+                      const pub = MOCK_PUBLICACIONES.find((p) => p.codigo_producto === config.codigo_producto);
+                      if (pub) onAction({ type: "editar_publicacion", pub });
+                      else alert("No hay publicación ML para este producto");
+                    }} className="text-xs text-blue-700 hover:underline">
+                      Editar precio ML
+                    </button>
+                  )}
                   <button onClick={() => onAction({ type: "editar_scraping", config })} className="text-xs text-honda-muted hover:underline">
                     Editar
                   </button>
@@ -581,6 +758,24 @@ function TabMonitorPrecios({ search, onAction }: { search: string; onAction: (m:
                       <div className={`text-sm font-bold ${posicionPrecio === "good" ? "text-green-700" : posicionPrecio === "ok" ? "text-yellow-700" : "text-red-600"}`}>
                         {formatARS(config.tu_precio_ars)}
                       </div>
+                    </div>
+                  )}
+                  {config.codigo_producto && MOCK_COSTOS[config.codigo_producto] && (
+                    <div className="rounded bg-[#fafafa] px-3 py-2 text-center">
+                      <div className="text-[10px] font-semibold uppercase text-honda-muted">Costo</div>
+                      <div className="text-sm font-bold text-honda-ink">{formatARS(MOCK_COSTOS[config.codigo_producto])}</div>
+                    </div>
+                  )}
+                  {config.tu_precio_ars && config.codigo_producto && MOCK_COSTOS[config.codigo_producto] && (
+                    <div className="rounded bg-[#fafafa] px-3 py-2 text-center">
+                      <div className="text-[10px] font-semibold uppercase text-honda-muted">Margen</div>
+                      {(() => {
+                        const costo = MOCK_COSTOS[config.codigo_producto!]!;
+                        const margen = config.tu_precio_ars! - costo;
+                        const pct = (margen / costo) * 100;
+                        const color = margen >= 0 ? "text-green-700" : "text-red-600";
+                        return <div className={`text-sm font-bold ${color}`}>{pct >= 0 ? "+" : ""}{pct.toFixed(1)}% ({formatARS(margen)})</div>;
+                      })()}
                     </div>
                   )}
                   <div className="flex items-end pb-1 text-[10px] text-honda-muted">
