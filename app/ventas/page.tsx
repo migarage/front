@@ -6,6 +6,7 @@ import { useCotizaciones } from "@/contexts/CotizacionesContext";
 import { ClienteSelector } from "@/components/ventas/ClienteSelector";
 import { DevolucionModal } from "@/components/ventas/DevolucionModal";
 import { PendienteReciboModal } from "@/components/ventas/PendienteReciboModal";
+import { ProductCombobox } from "@/components/ProductCombobox";
 
 /* ------------------------------------------------------------------ */
 /*  Constants & Types                                                  */
@@ -283,11 +284,11 @@ const MOCK: Venta[] = [
 ];
 
 const MOCK_PRODUCTOS = [
-  { codigo_producto: "REP-8834", descripcion: "Filtro de Aceite sintético reforzado V2", precio_usd_lista: 48.0, stock: 45 },
-  { codigo_producto: "REP-1201", descripcion: "Pastillas de freno delanteras cerámicas", precio_usd_lista: 32.0, stock: 120 },
-  { codigo_producto: "REP-9999", descripcion: "Válvula EGR electrónica", precio_usd_lista: 125.0, stock: 8 },
-  { codigo_producto: "REP-5501", descripcion: "Bujía de encendido iridium", precio_usd_lista: 8.5, stock: 340 },
-  { codigo_producto: "REP-3300", descripcion: "Correa de distribución reforzada", precio_usd_lista: 65.0, stock: 0 },
+  { codigo_producto: "REP-8834", descripcion: "Filtro de Aceite sintético reforzado V2", precio_usd_lista: 48.0, stock: 45, proveedor: "Bosch Argentina" },
+  { codigo_producto: "REP-1201", descripcion: "Pastillas de freno delanteras cerámicas", precio_usd_lista: 32.0, stock: 120, proveedor: "Bosch Argentina" },
+  { codigo_producto: "REP-9999", descripcion: "Válvula EGR electrónica", precio_usd_lista: 125.0, stock: 8, proveedor: "Mahle" },
+  { codigo_producto: "REP-5501", descripcion: "Bujía de encendido iridium", precio_usd_lista: 8.5, stock: 340, proveedor: "NGK" },
+  { codigo_producto: "REP-3300", descripcion: "Correa de distribución reforzada", precio_usd_lista: 65.0, stock: 0, proveedor: "Mann Filter" },
 ];
 
 const MOCK_FACTURAS: Record<string, FacturaVentaDetail> = {
@@ -839,12 +840,19 @@ export default function VentasPage() {
                           if (!itemsConMargen.length) return <span className="text-xs text-honda-muted">—</span>;
                           const avgMargen = itemsConMargen.reduce((s, i) => s + (i.margen_porcentaje ?? 0), 0) / itemsConMargen.length;
                           const totalMargenUsd = itemsConMargen.reduce((s, i) => s + (i.margen ?? 0) * i.cantidad, 0);
+                          const avgCotiz = itemsConMargen.reduce((s, i) => {
+                            const pu = i.precio_unitario_sin_iva;
+                            const pa = i.precio_ars ?? pu;
+                            return s + (pu > 0 && pa > 0 ? pa / pu : 0);
+                          }, 0) / itemsConMargen.length || 1;
+                          const totalMargenArs = totalMargenUsd * avgCotiz;
                           const color = avgMargen >= 0 ? "text-green-700" : "text-red-600";
                           return (
-                            <span className={`text-xs font-medium ${color}`}>
-                              {avgMargen >= 0 ? "+" : ""}{avgMargen.toFixed(1)}%
+                            <div className={`text-xs font-medium ${color}`}>
+                              <span>{avgMargen >= 0 ? "+" : ""}{avgMargen.toFixed(1)}%</span>
                               <span className="ml-1 text-[10px] text-honda-muted">({formatUSD(totalMargenUsd)})</span>
-                            </span>
+                              <span className="ml-1 text-[10px] text-honda-muted">({formatARS(totalMargenArs)})</span>
+                            </div>
                           );
                         })()}
                       </td>
@@ -965,6 +973,26 @@ export default function VentasPage() {
             }))}
             onConfirm={(data) => {
               handleEstadoChange(modal.venta.id_venta, data.estado_resultante);
+
+              const itemsAPedir = data.items.filter((i) => i.cantidad_pedir > 0 && i.pendiente_asignacion);
+              if (itemsAPedir.length > 0) {
+                const porProveedor = new Map<string, typeof itemsAPedir>();
+                for (const item of itemsAPedir) {
+                  const prod = MOCK_PRODUCTOS.find((p) => p.codigo_producto === item.codigo_producto);
+                  const prov = prod?.proveedor ?? "Sin proveedor";
+                  if (!porProveedor.has(prov)) porProveedor.set(prov, []);
+                  porProveedor.get(prov)!.push(item);
+                }
+                const creadas: string[] = [];
+                for (const [prov, items] of porProveedor) {
+                  const num = `SC-2026-${String(Date.now()).slice(-4)}`;
+                  creadas.push(`${num} (${prov})`);
+                }
+                if (creadas.length > 0) {
+                  flash(`Solicitudes de compra creadas: ${creadas.join(", ")}`);
+                }
+              }
+
               setModal(null);
             }}
             onClose={() => setModal(null)}
@@ -1123,6 +1151,13 @@ function CreateVentaModal({
   }
 
   function updateItem(idx: number, field: string, value: string | number) {
+    if (field === "codigo_producto" && String(value)) {
+      const isDuplicate = items.some((item, i) => i !== idx && item.codigo_producto === String(value));
+      if (isDuplicate) {
+        alert(`El producto ${value} ya está en la lista. Podés modificar la cantidad en la línea existente.`);
+        return;
+      }
+    }
     setItems(items.map((item, i) => {
       if (i !== idx) return item;
       const updated = { ...item, [field]: value };
@@ -1286,19 +1321,11 @@ function CreateVentaModal({
                 <div key={idx} className="flex flex-wrap items-start gap-3 border border-honda-line p-3">
                   <label className="block min-w-[220px] flex-1">
                     <span className="mb-1 block text-[10px] text-honda-muted">Producto</span>
-                    <select
+                    <ProductCombobox
+                      products={MOCK_PRODUCTOS.map((p) => ({ codigo_producto: p.codigo_producto, descripcion: p.descripcion }))}
                       value={item.codigo_producto}
-                      onChange={(e) => updateItem(idx, "codigo_producto", e.target.value)}
-                      required
-                      className="h-9 w-full border border-honda-line px-2 text-sm outline-none focus:border-[#CC0000]"
-                    >
-                      <option value="">Seleccionar</option>
-                      {MOCK_PRODUCTOS.map((p) => (
-                        <option key={p.codigo_producto} value={p.codigo_producto}>
-                          {p.codigo_producto} — {p.descripcion}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(code) => updateItem(idx, "codigo_producto", code)}
+                    />
                   </label>
                   <div className="w-16 shrink-0">
                     <span className="mb-1 block text-[10px] text-honda-muted">Stock</span>
@@ -1384,7 +1411,7 @@ function CreateVentaModal({
                             const m = finalUsd - prod.precio_usd_lista;
                             const mPct = (m / prod.precio_usd_lista) * 100;
                             const color = m >= 0 ? "text-green-700 bg-green-50" : "text-red-600 bg-red-50";
-                            return <span className={`block rounded px-2 py-1.5 text-center text-[10px] font-semibold ${color}`}>{m >= 0 ? "+" : ""}{mPct.toFixed(1)}% ({formatUSD(m)})</span>;
+                            return <span className={`block rounded px-2 py-1.5 text-center text-[10px] font-semibold ${color}`}>{m >= 0 ? "+" : ""}{mPct.toFixed(1)}% ({formatUSD(m)}) ({formatARS(m * cotiz)})</span>;
                           }
                           return <span className="block rounded bg-gray-50 px-2 py-1.5 text-center text-[10px] text-honda-muted">Margen —</span>;
                         })()}
@@ -1538,6 +1565,13 @@ function EditVentaModal({
   }
 
   function updateItem(idx: number, field: string, value: string | number) {
+    if (field === "codigo_producto" && String(value)) {
+      const isDuplicate = items.some((item, i) => i !== idx && item.codigo_producto === String(value));
+      if (isDuplicate) {
+        alert(`El producto ${value} ya está en la lista. Podés modificar la cantidad en la línea existente.`);
+        return;
+      }
+    }
     setItems(items.map((item, i) => {
       if (i !== idx) return item;
       const updated = { ...item, [field]: value };
@@ -1684,19 +1718,11 @@ function EditVentaModal({
                 <div key={idx} className="flex flex-wrap items-start gap-3 border border-honda-line p-3">
                   <label className="block min-w-[220px] flex-1">
                     <span className="mb-1 block text-[10px] text-honda-muted">Producto</span>
-                    <select
+                    <ProductCombobox
+                      products={MOCK_PRODUCTOS.map((p) => ({ codigo_producto: p.codigo_producto, descripcion: p.descripcion }))}
                       value={item.codigo_producto}
-                      onChange={(e) => updateItem(idx, "codigo_producto", e.target.value)}
-                      required
-                      className="h-9 w-full border border-honda-line px-2 text-sm outline-none focus:border-[#CC0000]"
-                    >
-                      <option value="">Seleccionar</option>
-                      {MOCK_PRODUCTOS.map((p) => (
-                        <option key={p.codigo_producto} value={p.codigo_producto}>
-                          {p.codigo_producto} — {p.descripcion}
-                        </option>
-                      ))}
-                    </select>
+                      onChange={(code) => updateItem(idx, "codigo_producto", code)}
+                    />
                   </label>
                   <div className="w-16 shrink-0">
                     <span className="mb-1 block text-[10px] text-honda-muted">Stock</span>
@@ -1782,7 +1808,7 @@ function EditVentaModal({
                             const m = finalUsd - prod.precio_usd_lista;
                             const mPct = (m / prod.precio_usd_lista) * 100;
                             const color = m >= 0 ? "text-green-700 bg-green-50" : "text-red-600 bg-red-50";
-                            return <span className={`block rounded px-2 py-1.5 text-center text-[10px] font-semibold ${color}`}>{m >= 0 ? "+" : ""}{mPct.toFixed(1)}% ({formatUSD(m)})</span>;
+                            return <span className={`block rounded px-2 py-1.5 text-center text-[10px] font-semibold ${color}`}>{m >= 0 ? "+" : ""}{mPct.toFixed(1)}% ({formatUSD(m)}) ({formatARS(m * cotiz)})</span>;
                           }
                           return <span className="block rounded bg-gray-50 px-2 py-1.5 text-center text-[10px] text-honda-muted">Margen —</span>;
                         })()}
@@ -2386,6 +2412,24 @@ function VentaDetalleModal({
           </button>
           <button type="button" onClick={() => alert("Exportar PDF — integración pendiente")} className="h-10 border border-honda-line px-6 text-sm font-semibold uppercase tracking-wide hover:bg-[#f6f6f6]">
             Exportar PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              const msg = encodeURIComponent(
+                `Hola! Te comparto el detalle de la venta #${venta.id_venta}:\n` +
+                `Cliente: ${venta.cliente_razon_social}\n` +
+                `Total: $${venta.monto_total_venta.toLocaleString("es-AR")}\n` +
+                `Estado: ${ESTADO_LABELS[venta.estado_venta] ?? venta.estado_venta}\n` +
+                (venta.facturas.length ? `Factura(s): ${venta.facturas.join(", ")}\n` : "") +
+                `\nÍtems:\n` +
+                venta.items.filter((i) => i.estado_item !== "ANULADO").map((i) => `• ${i.descripcion_item} x${i.cantidad} — $${i.precio_unitario_sin_iva.toLocaleString("es-AR")}`).join("\n")
+              );
+              window.open(`https://wa.me/?text=${msg}`, "_blank");
+            }}
+            className="h-10 border border-green-600 px-5 text-sm font-semibold uppercase tracking-wide text-green-700 hover:bg-green-50"
+          >
+            <span className="mr-1">📱</span> Compartir WhatsApp
           </button>
         </div>
       </div>

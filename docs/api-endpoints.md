@@ -730,7 +730,8 @@ El usuario puede modificar el precio manualmente. El coeficiente NO se guarda en
 2. **`→ NOTA_DE_PEDIDO`**: Solo cambiar estado. Sin efecto en stock.
 3. **`→ Preparar Pedido` (desde NOTA_DE_PEDIDO, con `items_disposicion`):**
    - Para cada ítem con `cantidad_inventario > 0`: reservar stock → `UPDATE inventario SET cantidad_disponible = cantidad_disponible - :cantidad_inventario WHERE codigo_producto = :codigo_producto`. Validar que `cantidad_disponible >= cantidad_inventario`.
-   - Para cada ítem con `cantidad_pedir > 0`: insertar en `venta_solicitud_compra`. Si tiene `id_solicitud_compra`, vincular. Si tiene `pendiente_asignacion = true`, dejar en cola.
+   - Para cada ítem con `cantidad_pedir > 0`: insertar en `venta_solicitud_compra`. Si tiene `id_solicitud_compra`, vincular. Si tiene `pendiente_asignacion = true`, **auto-crear solicitudes de compra agrupadas por proveedor** (ver lógica abajo).
+   - **Auto-creación de solicitudes de compra:** Cuando hay ítems con `pendiente_asignacion = true`, el backend agrupa los ítems por `proveedor_habitual` del producto (tabla `productos`). Por cada proveedor crea una solicitud de compra nueva en estado `PARA_PEDIR` con los ítems correspondientes, e inserta en `venta_solicitud_compra` con el `id_solicitud_compra` recién generado. El response incluye `solicitudes_creadas` con los números de solicitud generados.
    - Si `precios_congelados = FALSE` y hay `items_precios`: procesar precios (buscar cotización, calcular USD, actualizar `detalle_venta` y `monto_total_venta`).
    - **Determinar estado automáticamente:** Si algún ítem tiene `cantidad_pedir > 0` → `PENDIENTE_RECIBO_MERCADERIA`. Si todos tienen `cantidad_pedir = 0` → `PENDIENTE_ENTREGA_CLIENTE`.
 4. **`→ PENDIENTE_ENTREGA_CLIENTE` (desde PENDIENTE_RECIBO_MERCADERIA)**: La mercadería del proveedor ya llegó. Reservar stock de los ítems que estaban pendientes (los que ya tenían stock reservado no se tocan). Si `precios_congelados = FALSE`, procesar `items_precios`.
@@ -2449,10 +2450,86 @@ WHERE dfc.id_solicitud_compra = :id_solicitud_compra;
       "fecha_emision": "2026-08-26",
       "entidad_nombre": "Repuestos El Sol S.R.L.",
       "monto_total": 162624.00,
+      "monto_cobrado": 0.00,
       "cae": "74359281039485",
       "estado": "Pendiente de Cobro"
     }
   ]
+}
+```
+
+---
+
+### 4.5 Registrar Cobro Parcial — `POST /api/v1/comprobantes/{id_comprobante}/cobro`
+
+> **Nota:** Permite registrar cobros parciales sobre una factura. El backend acumula el total cobrado y actualiza el estado automáticamente:
+> - Si `monto_cobrado_total < monto_total` → `Cobro Parcial`
+> - Si `monto_cobrado_total >= monto_total` → `Cobrado Total`
+
+**Input Payload:**
+```json
+{
+  "monto": 50000.00,
+  "forma_pago": "Transferencia",
+  "referencia": "TRX-99201",
+  "fecha": "2026-09-05"
+}
+```
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Cobro registrado correctamente",
+  "data": {
+    "id_cobro": 301,
+    "monto_cobrado_total": 50000.00,
+    "monto_pendiente": 112624.00,
+    "estado_cobro": "Cobro Parcial",
+    "cobros": [
+      {
+        "id_cobro": 301,
+        "fecha": "2026-09-05",
+        "monto": 50000.00,
+        "forma_pago": "Transferencia",
+        "referencia": "TRX-99201"
+      }
+    ]
+  }
+}
+```
+
+**Lógica backend:**
+1. Validar que el comprobante exista y sea tipo FACTURA.
+2. Validar que `monto > 0` y que `monto_cobrado_total + monto <= monto_total` (no se permite cobrar más del total).
+3. `INSERT INTO comprobante_cobros (id_comprobante, fecha, monto, forma_pago, referencia)`.
+4. `UPDATE comprobantes SET monto_cobrado = monto_cobrado + :monto, estado_cobro = CASE WHEN monto_cobrado + :monto >= monto_total THEN 'Cobrado Total' ELSE 'Cobro Parcial' END`.
+5. Retornar el historial completo de cobros del comprobante.
+
+---
+
+### 4.6 Historial de Cobros — `GET /api/v1/comprobantes/{id_comprobante}/cobros`
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": {
+    "id_comprobante": 4512,
+    "monto_total": 162624.00,
+    "monto_cobrado": 50000.00,
+    "monto_pendiente": 112624.00,
+    "estado_cobro": "Cobro Parcial",
+    "cobros": [
+      {
+        "id_cobro": 301,
+        "fecha": "2026-09-05",
+        "monto": 50000.00,
+        "forma_pago": "Transferencia",
+        "referencia": "TRX-99201"
+      }
+    ]
+  }
 }
 ```
 
@@ -2742,11 +2819,12 @@ Devuelve la cabecera y todos los ítems de una lista de precios.
 ### 6.7 Cargar Lista de Precio (Upload + Parseo) — `POST /api/v1/proveedores/{id_proveedor}/listas-precio`
 
 **Flujo:**
-1. El frontend envía el archivo como base64 junto con la fecha de la lista.
+1. El frontend envía el archivo como base64 junto con la fecha de la lista y el tipo de cambio seleccionado.
 2. El backend parsea el archivo (Excel, CSV, PDF o imagen vía OCR).
 3. El backend devuelve los ítems parseados para revisión del usuario (NO se persisten aún).
 4. Si hay productos con `codigo_producto` que no existen en la tabla `productos`, se marcan como `nuevo: true` para que el frontend muestre un aviso.
 5. El frontend muestra la tabla con los ítems parseados para que el usuario revise, edite o elimine antes de confirmar.
+6. El `tipo_cambio` indica con qué cotización se valorizan los precios USD de la lista (valores posibles: `Oficial`, `Blue`, `MEP`, etc. — los mismos que devuelve `GET /api/v1/cotizaciones/hoy`).
 
 **Input Payload:**
 ```json
@@ -2755,6 +2833,7 @@ Devuelve la cabecera y todos los ítems de una lista de precios.
   "archivo_base64": "data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,UEsDBBQ...",
   "nombre_archivo": "lista_bosch_sep2026.xlsx",
   "tipo_archivo": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "tipo_cambio": "Blue",
   "observaciones": "Lista actualizada septiembre"
 }
 ```
@@ -2880,7 +2959,8 @@ Elimina una lista de precios y sus ítems. **No revierte los precios** de los pr
   "direccion": "Av. Mitre 1420",
   "localidad": "Caseros",
   "provincia": "Buenos Aires",
-  "codigo_postal": "1678"
+  "codigo_postal": "1678",
+  "celular": "+54 11 1234-5678"
 }
 ```
 
@@ -2964,6 +3044,7 @@ Elimina una lista de precios y sus ítems. **No revierte los precios** de los pr
       "cuit": "30-71234567-8",
       "tipo_factura_habitual": "A",
       "direccion": "Av. Mitre 1500, Caseros, Buenos Aires",
+      "celular": "+54 11 1234-5678",
       "cuenta_corriente": {
         "saldo_deudor": 162624.00,
         "saldo_a_favor": 0.00,
@@ -3501,6 +3582,69 @@ GROUP BY fc.id_factura_compra, dfc.alicuota_iva;
 
 ---
 
+### 9.1.8 Acciones Masivas sobre Publicaciones — `POST /api/v1/ml/publicaciones/masivo`
+
+> **Nota:** Permite ejecutar una acción sobre múltiples publicaciones seleccionadas a la vez.
+
+**Input Payload (subir precio por porcentaje):**
+```json
+{
+  "accion": "subir_precio_porcentaje",
+  "ids_publicaciones": [1, 2, 5, 8],
+  "valor": 10.5
+}
+```
+
+**Input Payload (subir precio por monto fijo):**
+```json
+{
+  "accion": "subir_precio_monto",
+  "ids_publicaciones": [1, 2, 5, 8],
+  "valor": 5000
+}
+```
+
+**Input Payload (pausar / activar / eliminar):**
+```json
+{
+  "accion": "pausar",
+  "ids_publicaciones": [1, 2, 5, 8]
+}
+```
+
+> Acciones válidas: `subir_precio_porcentaje`, `subir_precio_monto`, `pausar`, `activar`, `eliminar`.
+
+**Lógica backend:**
+1. Validar que todas las `ids_publicaciones` existan.
+2. Según la acción:
+   - **`subir_precio_porcentaje`**: Para cada publicación: `nuevo_precio = precio * (1 + valor/100)`. Redondear a entero. Actualizar en ML vía `PUT /items/{ml_item_id}` y en la DB local.
+   - **`subir_precio_monto`**: Para cada publicación: `nuevo_precio = precio + valor`. Actualizar en ML y DB local.
+   - **`pausar`**: Solo sobre publicaciones con `estado_ml = 'active'`. `PUT /items/{ml_item_id}` con `{ "status": "paused" }`.
+   - **`activar`**: Solo sobre publicaciones con `estado_ml = 'paused'`. `PUT /items/{ml_item_id}` con `{ "status": "active" }`.
+   - **`eliminar`**: `PUT /items/{ml_item_id}` con `{ "status": "closed" }`. Marcar como `closed` en DB local.
+3. Registrar resultado individual por publicación (éxito/error por cada una).
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "message": "Acción masiva completada: 4 publicaciones actualizadas",
+  "data": {
+    "total_procesadas": 4,
+    "exitosas": 4,
+    "errores": 0,
+    "detalle": [
+      { "id_publicacion": 1, "resultado": "ok", "nuevo_precio": 103950 },
+      { "id_publicacion": 2, "resultado": "ok", "nuevo_precio": 55000 },
+      { "id_publicacion": 5, "resultado": "ok", "nuevo_precio": 187425 },
+      { "id_publicacion": 8, "resultado": "ok", "nuevo_precio": 41800 }
+    ]
+  }
+}
+```
+
+---
+
 ### 9.2 Órdenes / Ventas ML
 
 ### 9.2.1 Webhook de órdenes — `POST /api/v1/ml/webhooks/orders`
@@ -3776,3 +3920,74 @@ GROUP BY fc.id_factura_compra, dfc.alicuota_iva;
     "errores": 0
   }
 }
+```
+
+---
+
+## 11. Pantalla: CONTABILIDAD
+
+> **Nota:** Este módulo NO tiene tablas propias. Todo se calcula a partir de datos existentes (ventas, compras, comprobantes). El backend tiene un único endpoint que retorna todos los datos del dashboard.
+
+### 11.1 Dashboard Contable — `GET /api/v1/contabilidad/dashboard`
+
+**Query Params:** `?periodo=mensual` o `?periodo=semanal` o `?desde=2026-08-01&hasta=2026-08-31`
+
+| Parámetro | Tipo | Descripción |
+|-----------|------|-------------|
+| `periodo` | string (opcional) | `semanal` (últimos 7 días) o `mensual` (últimos 30 días). Ignorado si se envía `desde`/`hasta`. |
+| `desde` | date (opcional) | Fecha inicio del rango personalizado (YYYY-MM-DD). |
+| `hasta` | date (opcional) | Fecha fin del rango personalizado (YYYY-MM-DD). |
+
+> Si no se envía ningún parámetro, default = `mensual`.
+
+**Response (200 OK):**
+```json
+{
+  "status": "success",
+  "data": {
+    "periodo": {
+      "tipo": "mensual",
+      "desde": "2026-09-01",
+      "hasta": "2026-09-30"
+    },
+    "ventas": {
+      "total_neto": 4250000.00,
+      "total_iva": 892500.00,
+      "total_bruto": 5142500.00,
+      "cantidad_operaciones": 34,
+      "desglose_por_canal": [
+        { "canal": "Minorista", "neto": 1700000.00, "iva": 357000.00 },
+        { "canal": "Mayorista", "neto": 1275000.00, "iva": 267750.00 },
+        { "canal": "MercadoLibre", "neto": 850000.00, "iva": 178500.00 },
+        { "canal": "Efectivo", "neto": 425000.00, "iva": 89250.00 }
+      ]
+    },
+    "compras": {
+      "total_neto": 2800000.00,
+      "total_iva": 588000.00,
+      "total_bruto": 3388000.00,
+      "cantidad_operaciones": 12,
+      "desglose_por_proveedor": [
+        { "proveedor": "Bosch Argentina", "neto": 1120000.00, "iva": 235200.00 },
+        { "proveedor": "Mann Filter", "neto": 560000.00, "iva": 117600.00 },
+        { "proveedor": "NGK", "neto": 700000.00, "iva": 147000.00 },
+        { "proveedor": "Mahle", "neto": 420000.00, "iva": 88200.00 }
+      ]
+    },
+    "posicion_iva": {
+      "debito_fiscal": 892500.00,
+      "credito_fiscal": 588000.00,
+      "saldo": 304500.00,
+      "tipo_saldo": "A_PAGAR"
+    },
+    "resultado_neto": 1450000.00
+  }
+}
+```
+
+**Lógica backend:**
+1. Determinar rango de fechas según `periodo` o `desde`/`hasta`.
+2. **Ventas:** `SELECT` de `facturas_venta` + `detalle_factura_venta` en el rango. Discriminar neto, IVA por alícuota, y agrupar por `canal_venta` de la venta asociada.
+3. **Compras:** `SELECT` de `facturas_compra` + `detalle_factura_compra` en el rango. Discriminar neto, IVA por alícuota, y agrupar por `proveedor_nombre`.
+4. **Posición IVA:** `debito_fiscal = sum(iva_ventas)`, `credito_fiscal = sum(iva_compras)`, `saldo = debito - credito`. Si `saldo >= 0` → `tipo_saldo = 'A_PAGAR'`, si `saldo < 0` → `tipo_saldo = 'CREDITO_FISCAL'` y `saldo = abs(saldo)`.
+5. **Resultado neto:** `total_ventas_neto - total_compras_neto`.

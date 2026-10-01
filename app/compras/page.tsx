@@ -3,6 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { formatARS, formatUSD, fmtDate } from "@/lib/format";
 import { useCotizaciones } from "@/contexts/CotizacionesContext";
+import { ProductCombobox } from "@/components/ProductCombobox";
 
 /* ------------------------------------------------------------------ */
 /*  Constants & Types                                                  */
@@ -10,7 +11,7 @@ import { useCotizaciones } from "@/contexts/CotizacionesContext";
 
 const ESTADO_LABELS: Record<string, string> = {
   PARA_PEDIR: "Para Pedir",
-  PENDIENTE_ENTREGA: "Pendiente Entrega",
+  PENDIENTE_ENTREGA: "Pedido al Proveedor",
   RECIBIDO_PARCIAL: "Recibido Parcial",
   RECIBIDO: "Recibido",
   CANCELADO: "Cancelado",
@@ -231,12 +232,36 @@ export default function ComprasPage() {
   const [facturasDB, setFacturasDB] = useState<Record<string, FacturaCompraDetail>>(MOCK_FACTURAS_COMPRA);
   const [search, setSearch] = useState("");
   const [filterEstado, setFilterEstado] = useState("");
+  const [filterProveedor, setFilterProveedor] = useState("");
+  const [filterDestino, setFilterDestino] = useState("");
+  const [filterFechaDesde, setFilterFechaDesde] = useState("");
+  const [filterFechaHasta, setFilterFechaHasta] = useState("");
+  const [filterTotalUsd, setFilterTotalUsd] = useState("");
+  const [filterTotalArs, setFilterTotalArs] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [page, setPage] = useState(1);
   const [modal, setModal] = useState<ModalState>(null);
   const [toast, setToast] = useState<string | null>(null);
   const { cotizaciones, getCotizacion } = useCotizaciones();
 
   const dolarTypes = cotizaciones.map((c) => c.tipo_dolar);
+
+  const proveedorOptions = useMemo(() => [...new Set(records.map((r) => r.proveedor_nombre))].sort(), [records]);
+  const destinoOptions = useMemo(() => [...new Set(records.map((r) => r.cliente_destino))].sort(), [records]);
+
+  const hasColumnFilters = !!(filterProveedor || filterDestino || filterFechaDesde || filterFechaHasta || filterTotalUsd || filterTotalArs);
+
+  function applyNumFilter(val: number, filter: string): boolean {
+    const f = filter.trim();
+    if (!f) return true;
+    if (f.startsWith(">=")) { const n = parseFloat(f.slice(2)); return !isNaN(n) && val >= n; }
+    if (f.startsWith("<=")) { const n = parseFloat(f.slice(2)); return !isNaN(n) && val <= n; }
+    if (f.startsWith(">")) { const n = parseFloat(f.slice(1)); return !isNaN(n) && val > n; }
+    if (f.startsWith("<")) { const n = parseFloat(f.slice(1)); return !isNaN(n) && val < n; }
+    if (f.startsWith("=")) { const n = parseFloat(f.slice(1)); return !isNaN(n) && val === n; }
+    const n = parseFloat(f);
+    return !isNaN(n) && val === n;
+  }
 
   const filtered = useMemo(() => {
     let result = records;
@@ -251,8 +276,14 @@ export default function ComprasPage() {
       );
     }
     if (filterEstado) result = result.filter((r) => r.estado_solicitud === filterEstado);
+    if (filterProveedor) result = result.filter((r) => r.proveedor_nombre === filterProveedor);
+    if (filterDestino) result = result.filter((r) => r.cliente_destino === filterDestino);
+    if (filterFechaDesde) result = result.filter((r) => r.fecha_solicitud >= filterFechaDesde);
+    if (filterFechaHasta) result = result.filter((r) => r.fecha_solicitud <= filterFechaHasta);
+    if (filterTotalUsd) result = result.filter((r) => applyNumFilter(r.monto_total_usd, filterTotalUsd));
+    if (filterTotalArs) result = result.filter((r) => applyNumFilter(r.monto_total_ars, filterTotalArs));
     return result;
-  }, [records, search, filterEstado]);
+  }, [records, search, filterEstado, filterProveedor, filterDestino, filterFechaDesde, filterFechaHasta, filterTotalUsd, filterTotalArs]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
@@ -397,38 +428,124 @@ export default function ComprasPage() {
           </div>
         </div>
 
+        {/* MASS ACTIONS BAR */}
+        {selectedIds.size > 0 && (
+          <div className="mt-4 flex items-center gap-3 rounded bg-indigo-50 px-4 py-2 text-sm">
+            <span className="font-medium text-indigo-800">{selectedIds.size} seleccionada{selectedIds.size > 1 ? "s" : ""}</span>
+            <span className="text-indigo-300">|</span>
+            <select
+              onChange={(e) => {
+                const nuevoEstado = e.target.value;
+                if (!nuevoEstado) return;
+                setRecords(records.map((r) => selectedIds.has(r.id_solicitud_compra) ? { ...r, estado_solicitud: nuevoEstado } : r));
+                flash(`${selectedIds.size} solicitud(es) → ${ESTADO_LABELS[nuevoEstado]}`);
+                setSelectedIds(new Set());
+                e.target.value = "";
+              }}
+              className="h-8 border border-indigo-200 bg-white px-2 text-xs font-medium outline-none"
+            >
+              <option value="">Cambiar estado a...</option>
+              <option value="PENDIENTE_ENTREGA">Pedido al Proveedor</option>
+              <option value="CANCELADO">Cancelar</option>
+            </select>
+            <button type="button" onClick={() => setSelectedIds(new Set())} className="ml-auto text-xs text-indigo-600 hover:underline">Deseleccionar todo</button>
+          </div>
+        )}
+
         {/* TABLE */}
         <div className="mt-6 overflow-x-auto border border-honda-line">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-[#f6f6f6] text-left">
+                <th className="whitespace-nowrap border-b border-honda-line px-2 py-3 text-center">
+                  <input
+                    type="checkbox"
+                    checked={paginated.filter((c) => c.estado_solicitud !== "CANCELADO" && c.estado_solicitud !== "RECIBIDO").length > 0 && paginated.filter((c) => c.estado_solicitud !== "CANCELADO" && c.estado_solicitud !== "RECIBIDO").every((c) => selectedIds.has(c.id_solicitud_compra))}
+                    onChange={() => {
+                      const selectable = paginated.filter((c) => c.estado_solicitud !== "CANCELADO" && c.estado_solicitud !== "RECIBIDO");
+                      const allSelected = selectable.every((c) => selectedIds.has(c.id_solicitud_compra));
+                      if (allSelected) {
+                        setSelectedIds((prev) => { const next = new Set(prev); selectable.forEach((c) => next.delete(c.id_solicitud_compra)); return next; });
+                      } else {
+                        setSelectedIds((prev) => { const next = new Set(prev); selectable.forEach((c) => next.add(c.id_solicitud_compra)); return next; });
+                      }
+                    }}
+                    className="h-3.5 w-3.5 accent-[#CC0000]"
+                  />
+                </th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">#</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Fecha</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Proveedor</th>
-                <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Destino</th>
+                <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide" title="A quién va la mercadería: Stock General o un cliente específico">Destino</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Total USD</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Total ARS</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">TC</th>
-                <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Factor</th>
+                <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide" title="Multiplicador sobre precio USD por gastos bancarios, impuestos, etc. (ej: 1.32 = 32% de recargo)">Factor Costo</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Estado</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Items</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Remitos</th>
                 <th className="whitespace-nowrap border-b border-honda-line px-4 py-3 text-xs font-semibold uppercase tracking-wide">Facturas</th>
                 <th className="border-b border-honda-line px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide">Acciones</th>
               </tr>
+              {/* Column filter row */}
+              <tr className="bg-[#fafafa]">
+                <th className="border-b border-honda-line px-2 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1">
+                  <div className="flex gap-1">
+                    <input value={filterFechaDesde} onChange={(e) => { setFilterFechaDesde(e.target.value); setPage(1); }} type="date" className="h-7 w-full border border-honda-line px-1 text-[10px] outline-none focus:border-[#CC0000]" title="Desde" />
+                    <input value={filterFechaHasta} onChange={(e) => { setFilterFechaHasta(e.target.value); setPage(1); }} type="date" className="h-7 w-full border border-honda-line px-1 text-[10px] outline-none focus:border-[#CC0000]" title="Hasta" />
+                  </div>
+                </th>
+                <th className="border-b border-honda-line px-3 py-1">
+                  <select value={filterProveedor} onChange={(e) => { setFilterProveedor(e.target.value); setPage(1); }} className="h-7 w-full border border-honda-line bg-white px-1 text-xs outline-none focus:border-[#CC0000]">
+                    <option value="">Todos</option>
+                    {proveedorOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </th>
+                <th className="border-b border-honda-line px-3 py-1">
+                  <select value={filterDestino} onChange={(e) => { setFilterDestino(e.target.value); setPage(1); }} className="h-7 w-full border border-honda-line bg-white px-1 text-xs outline-none focus:border-[#CC0000]">
+                    <option value="">Todos</option>
+                    {destinoOptions.map((d) => <option key={d} value={d}>{d}</option>)}
+                  </select>
+                </th>
+                <th className="border-b border-honda-line px-3 py-1">
+                  <input value={filterTotalUsd} onChange={(e) => { setFilterTotalUsd(e.target.value); setPage(1); }} placeholder=">0" className="h-7 w-full border border-honda-line px-1 text-xs outline-none focus:border-[#CC0000]" title="Ej: >1000, <5000" />
+                </th>
+                <th className="border-b border-honda-line px-3 py-1">
+                  <input value={filterTotalArs} onChange={(e) => { setFilterTotalArs(e.target.value); setPage(1); }} placeholder=">0" className="h-7 w-full border border-honda-line px-1 text-xs outline-none focus:border-[#CC0000]" title="Ej: >100000" />
+                </th>
+                <th className="border-b border-honda-line px-3 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1"></th>
+                <th className="border-b border-honda-line px-3 py-1 text-right">
+                  {(hasColumnFilters) && (
+                    <button type="button" onClick={() => { setFilterProveedor(""); setFilterDestino(""); setFilterFechaDesde(""); setFilterFechaHasta(""); setFilterTotalUsd(""); setFilterTotalArs(""); setPage(1); }} className="text-[10px] font-medium text-[#CC0000] hover:underline">Limpiar</button>
+                  )}
+                </th>
+              </tr>
             </thead>
             <tbody>
               {paginated.length === 0 ? (
                 <tr>
-                  <td colSpan={13} className="px-4 py-8 text-center text-honda-muted">
+                  <td colSpan={14} className="px-4 py-8 text-center text-honda-muted">
                     Sin resultados
                   </td>
                 </tr>
               ) : (
                 paginated.map((compra) => {
                   const actions = getAvailableActions(compra);
+                  const canCheck = compra.estado_solicitud !== "CANCELADO" && compra.estado_solicitud !== "RECIBIDO";
                   return (
                     <tr key={compra.id_solicitud_compra} className="border-b border-honda-line hover:bg-[#fafafa]">
+                      <td className="whitespace-nowrap px-2 py-3 text-center">
+                        {canCheck ? (
+                          <input type="checkbox" checked={selectedIds.has(compra.id_solicitud_compra)} onChange={() => { setSelectedIds((prev) => { const next = new Set(prev); if (next.has(compra.id_solicitud_compra)) next.delete(compra.id_solicitud_compra); else next.add(compra.id_solicitud_compra); return next; }); }} className="h-3.5 w-3.5 accent-[#CC0000]" />
+                        ) : <span className="inline-block h-3.5 w-3.5" />}
+                      </td>
                       <td className="whitespace-nowrap px-4 py-3 font-mono text-xs">
                         <button type="button" onClick={() => setModal({ type: "detalle", compra })} className="text-[#CC0000] underline decoration-[#CC0000]/30 hover:decoration-[#CC0000]">
                           {compra.numero_solicitud}
@@ -802,7 +919,7 @@ function CreateCompraModal({
             </select>
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Destino</span>
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted" title="A quién va la mercadería: tu stock o directamente a un cliente">Destino <span className="cursor-help text-[10px] text-honda-muted" title="Si seleccionás un cliente, la compra se vincula a su pedido. 'Stock General' va a tu inventario.">ⓘ</span></span>
             <select name="cliente_destino" className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]">
               <option value="Stock General">Stock General</option>
               <option value="Repuestos El Sol S.R.L.">Repuestos El Sol S.R.L.</option>
@@ -821,7 +938,7 @@ function CreateCompraModal({
             </select>
           </label>
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Factor Costos</span>
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Factor Costos <span className="cursor-help text-[10px] text-honda-muted" title="Multiplicador sobre el precio USD que refleja gastos bancarios, impuestos y comisiones. Ej: 1.32 = 32% de recargo sobre el precio de lista.">ⓘ</span></span>
             <input type="number" step="0.01" value={factorCostos} onChange={(e) => setFactorCostos(e.target.value)} className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]" />
           </label>
         </div>
@@ -843,9 +960,11 @@ function CreateCompraModal({
                 <div key={idx} className="grid grid-cols-12 items-end gap-2 border border-honda-line p-3">
                   <div className="col-span-3">
                     <span className="mb-1 block text-[10px] font-semibold uppercase text-honda-muted">Producto</span>
-                    <select value={item.codigo_producto} onChange={(e) => updateItem(idx, "codigo_producto", e.target.value)} className="h-9 w-full border border-honda-line px-2 text-xs outline-none focus:border-[#CC0000]">
-                      {MOCK_PRODUCTOS.map((p) => <option key={p.codigo_producto} value={p.codigo_producto}>{p.codigo_producto} — {p.descripcion}</option>)}
-                    </select>
+                    <ProductCombobox
+                      products={MOCK_PRODUCTOS.map((p) => ({ codigo_producto: p.codigo_producto, descripcion: p.descripcion }))}
+                      value={item.codigo_producto}
+                      onChange={(code) => updateItem(idx, "codigo_producto", code)}
+                    />
                   </div>
                   <div className="col-span-1">
                     <span className="mb-1 block text-[10px] font-semibold uppercase text-honda-muted">Cant.</span>
@@ -989,7 +1108,7 @@ function EditCompraModal({
 
         <div className="mt-4 grid grid-cols-2 gap-4">
           <label className="block">
-            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Factor Costos</span>
+            <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-honda-muted">Factor Costos <span className="cursor-help text-[10px] text-honda-muted" title="Multiplicador sobre el precio USD que refleja gastos bancarios, impuestos y comisiones. Ej: 1.32 = 32% de recargo sobre el precio de lista.">ⓘ</span></span>
             <input type="number" step="0.01" value={factorCostos} onChange={(e) => setFactorCostos(e.target.value)} className="h-10 w-full border border-honda-line px-3 text-sm outline-none focus:border-[#CC0000]" />
           </label>
         </div>
@@ -1009,9 +1128,11 @@ function EditCompraModal({
                 <div key={idx} className="grid grid-cols-12 items-end gap-2 border border-honda-line p-3">
                   <div className="col-span-3">
                     <span className="mb-1 block text-[10px] font-semibold uppercase text-honda-muted">Producto</span>
-                    <select value={item.codigo_producto} onChange={(e) => updateItem(idx, "codigo_producto", e.target.value)} className="h-9 w-full border border-honda-line px-2 text-xs outline-none focus:border-[#CC0000]">
-                      {MOCK_PRODUCTOS.map((p) => <option key={p.codigo_producto} value={p.codigo_producto}>{p.codigo_producto} — {p.descripcion}</option>)}
-                    </select>
+                    <ProductCombobox
+                      products={MOCK_PRODUCTOS.map((p) => ({ codigo_producto: p.codigo_producto, descripcion: p.descripcion }))}
+                      value={item.codigo_producto}
+                      onChange={(code) => updateItem(idx, "codigo_producto", code)}
+                    />
                   </div>
                   <div className="col-span-1">
                     <span className="mb-1 block text-[10px] font-semibold uppercase text-honda-muted">Cant.</span>
